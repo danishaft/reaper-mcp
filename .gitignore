@@ -1,0 +1,12 @@
+.pytest_cache/
+.ruff_cache/
+.venv/
+__pycache__/
+*.py[cod]
+dist/
+*.egg-info/
+
+# Local bridge, test, and render artifacts
+reaper-mcp-bridge/
+*.rpp-bak
+*.wav
