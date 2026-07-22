@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "reaper-mcp"
+version = "0.1.0"
+description = "MCP server for controlling REAPER through a Lua bridge."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
+dependencies = [
+  "mcp>=1.0.0",
+  "pydantic>=2.7",
+  "pydantic-settings>=2.2",
+]
+
+[project.scripts]
+reaper-mcp = "reaper_mcp.server:main"
+reaper-mcp-install = "reaper_mcp.install:main"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.0",
+  "pytest-asyncio>=0.23",
+  "ruff>=0.5",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/reaper_mcp"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"lua/reaper_mcp_bridge.lua" = "reaper_mcp/resources/reaper_mcp_bridge.lua"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
