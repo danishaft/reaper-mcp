@@ -6,22 +6,24 @@ project and track tools, transport controls, media item tools, MIDI note list,
 insert, update, and delete tools, GUID-based item editing, FX chain and
 parameter tools, marker and region tools, tempo and time signature tools,
 routing and freeze operations, guarded MIDI transformations, and a complete
-song-starter workflow. It also includes automation envelopes, take and comping
-controls, project navigation and saving, and runtime tool profiles. MCP tools
+song-starter workflow. It also includes MIDI controller events, tempo-map
+markers, automation envelopes, take and comping controls, project controls,
+FX presets and chain copying, track templates, batch track updates, audio
+analysis, project navigation and saving, and runtime tool profiles. MCP tools
 send JSON commands through the file bridge and read structured responses from
 REAPER.
 
 > **Note:** This project is under active development. The server currently
-> registers 108 tools. The default `production` profile exposes 104 stable
+> registers 146 tools. The default `production` profile exposes 142 stable
 > tools and hides the four experimental render tools. The `full` profile
-> exposes all 108. The
+> exposes all 146. The
 > [product reality audit](docs/reaper-mcp-product-reality-audit.md) records
 > which tools have passed live REAPER acceptance.
 
-> **Warning:** Full-project rendering is experimental. The tested REAPER render
-> action can create a WAV and then block the Lua bridge without returning a
-> confirmed result. Do not rely on render tools for unattended or destructive
-> workflows. See the
+> **Note:** Isolated full-project WAV rendering is live-verified when
+> `REAPER_MCP_REAPER_EXECUTABLE` points to a REAPER binary. The native render
+> lifecycle and fallback action remain experimental and are hidden from the
+> default profile. See the
 > [product reality audit](docs/reaper-mcp-product-reality-audit.md).
 
 ## What is included
@@ -34,7 +36,7 @@ MCP server and REAPER.
 - Typed bridge models for `CommandEnvelope`, `BridgeResponse`, and
   `ErrorResponse`.
 - File bridge client with request IDs, response polling, cleanup, and timeouts.
-- MCP server entrypoint registering the 108 tools tracked in the
+- MCP server entrypoint registering the 146 tools tracked in the
   [product reality audit](docs/reaper-mcp-product-reality-audit.md).
 - Unit tests that run without REAPER.
 - Opt-in integration tests for isolated live REAPER acceptance.
@@ -107,6 +109,10 @@ The bridge creates three subdirectories:
 
 Bridge settings use the `REAPER_MCP_` environment variable prefix:
 
+- `REAPER_MCP_TRANSPORT` maps to `transport` and defaults to `stdio`. Set it to
+  `http` to enable the optional local REST interface.
+- `REAPER_MCP_HTTP_HOST` maps to `http_host` and defaults to `127.0.0.1`.
+- `REAPER_MCP_HTTP_PORT` maps to `http_port` and defaults to `8765`.
 - `REAPER_MCP_BRIDGE_DIR` maps to `bridge_dir`.
 - `REAPER_MCP_BRIDGE_TIMEOUT_SECONDS` maps to `bridge_timeout_seconds`
   and defaults to `5.0`.
@@ -124,12 +130,20 @@ Bridge settings use the `REAPER_MCP_` environment variable prefix:
   defaults to an empty list.
 - `REAPER_MCP_ALLOWED_RENDER_ROOTS` maps to `allowed_render_roots` and
   defaults to an empty list.
+- `REAPER_MCP_ALLOWED_TEMPLATE_ROOTS` maps to `allowed_template_roots` and
+  defaults to an empty list.
+- `REAPER_MCP_ALLOWED_AUDIO_ROOTS` maps to `allowed_audio_roots` and defaults
+  to an empty list.
 - `REAPER_MCP_RENDER_TIMEOUT_SECONDS` maps to `render_timeout_seconds` and
   defaults to `60.0`.
 - `REAPER_MCP_RENDER_POLL_INTERVAL_SECONDS` maps to
   `render_poll_interval_seconds` and defaults to `0.1`.
 - `REAPER_MCP_RENDER_BACKGROUND_CONFIRMED` maps to
   `render_background_confirmed` and defaults to `false`.
+- `REAPER_MCP_RENDER_EXTERNAL_ENABLED` maps to `render_external_enabled` and
+  defaults to `true`.
+- `REAPER_MCP_REAPER_EXECUTABLE` maps to `reaper_executable`. Set it to the
+  absolute path of the REAPER executable when it is not available on `PATH`.
 
 `insert_audio_item` only accepts source files inside
 `allowed_media_source_roots`. With the default empty list, audio insertion is
@@ -155,26 +169,101 @@ array before calling render tools:
 export REAPER_MCP_ALLOWED_RENDER_ROOTS='["/home/ayodele/Music/Renders"]'
 ```
 
-Before enabling render execution, open **Preferences > Audio > Rendering** in
-REAPER and enable **Render in background (does not apply to queued renders)**.
-Then explicitly confirm that setting for this MCP process:
+Track-template files and audio-analysis inputs are also default-deny. Configure
+their roots before using `save_track_template`, `apply_track_template`, or
+`analyze_audio_file`:
+
+```bash
+export REAPER_MCP_ALLOWED_TEMPLATE_ROOTS='["/home/ayodele/Music/Templates"]'
+export REAPER_MCP_ALLOWED_AUDIO_ROOTS='["/home/ayodele/Music/Renders"]'
+```
+
+The external renderer does not require REAPER's background-render preference. If
+you disable the external renderer and use the native fallback, open
+**Preferences > Audio > Rendering**, enable **Render in background (does not
+apply to queued renders)**, and explicitly confirm that setting for this MCP
+process:
 
 ```bash
 export REAPER_MCP_RENDER_BACKGROUND_CONFIRMED=true
 ```
 
-The server rejects render execution before bridge invocation when this flag is
-not set. This protects the file bridge from a synchronous REAPER render action
-that can block the Lua event loop. The flag is a user confirmation, not an
-automatic capability probe.
+The confirmation flag applies only to the native fallback. It protects the
+file bridge from a synchronous REAPER render action that can block the Lua event
+loop. The flag is a user confirmation, not an automatic capability probe.
 
 ## Run the server
 
-Start the MCP server over stdio with this command:
+Start the MCP server over stdio with this command. Stdio is the default and is
+the recommended transport for MCP clients.
 
 ```bash
 uv run reaper-mcp
 ```
+
+### Optional local REST interface
+
+The server also provides an optional loopback-only REST interface. It reuses
+the same MCP tool registry, profiles, services, validation, and structured
+results. It does not add a separate CLI or duplicate REAPER logic.
+
+Start HTTP mode by setting the transport environment variable:
+
+```bash
+export REAPER_MCP_TRANSPORT=http
+export REAPER_MCP_HTTP_HOST=127.0.0.1
+export REAPER_MCP_HTTP_PORT=8765
+uv run reaper-mcp
+```
+
+The API is available at `http://127.0.0.1:8765`:
+
+- `GET /api/health` checks the Python server and Lua bridge.
+- `GET /api/tools` lists tools visible in the active profile.
+- `POST /api/tools/{tool_name}` calls a visible tool with a JSON object body.
+
+For example:
+
+```bash
+curl http://127.0.0.1:8765/api/tools/get_active_profile
+curl -X POST http://127.0.0.1:8765/api/tools/get_project_snapshot \
+  -H 'content-type: application/json' \
+  -d '{}'
+```
+
+The REST server rejects non-loopback bindings because it has no authentication
+layer. Keep the API local unless an authenticated gateway is added later.
+
+### Command-line interface
+
+The CLI calls the same profiled MCP server and provides a complete command for
+every visible tool. It does not contain separate REAPER logic.
+
+List the tools in the active profile:
+
+```bash
+uv run reaper-mcp-cli tools --pretty
+```
+
+Call any tool with a JSON object:
+
+```bash
+uv run reaper-mcp-cli call set_tempo --json '{"bpm": 96}'
+```
+
+Simple producer-facing aliases are also available:
+
+```bash
+uv run reaper-mcp-cli project snapshot
+uv run reaper-mcp-cli tracks list
+uv run reaper-mcp-cli transport play
+uv run reaper-mcp-cli transport stop
+```
+
+Use `--arg key=value` for simple scalar arguments, `--json` for nested
+arguments, and `--profile full` when a command needs an advanced capability.
+The CLI returns compact JSON by default and uses non-zero exit codes for
+invalid requests, hidden tools, bridge failures, and failed tool results.
 
 Example MCP client configuration:
 
@@ -219,10 +308,14 @@ Use this flow after installing dependencies.
    `quantize_midi_notes`, `humanize_midi_notes`,
    `snap_midi_notes_to_scale`, `shape_midi_note_velocities`, and
    `remove_midi_note_overlaps` with the guarded identities returned by
-   `get_midi_notes`.
+   `get_midi_notes`. Use `analyze_audio_file` for approved local WAV files and
+   `calculate_take_loudness` for non-modal level metrics from a take's approved
+   WAV source.
    Then call `add_fx`, `set_fx_enabled`, `get_fx_parameters`,
-   `set_fx_parameter`, and `remove_fx` using the FX identifiers and guarded
-   identities returned by the read-only FX tools. Call `list_markers`,
+   `set_fx_parameter`, `get_fx_preset`, `set_fx_preset`,
+   `get_fx_preset_index`, `set_fx_preset_index`, `navigate_fx_presets`, and
+   `remove_fx` using the FX identifiers and guarded identities returned by the
+   read-only FX tools. Call `list_markers`,
    `create_marker`, `delete_marker`, `list_regions`, `create_region`,
    `delete_region`, `get_tempo`, `set_tempo`, `get_time_signature`, and
    `set_time_signature` to validate arrangement and timeline behavior. Treat
@@ -301,6 +394,11 @@ FX parameters are addressed by guarded FX identity plus parameter index.
 the updated parameter with its index, name, normalized value, and formatted
 value.
 
+FX preset index tools use REAPER's native preset bank. Index `-2` selects the
+factory preset, index `-1` selects the default user preset, and non-negative
+indexes select entries reported by REAPER. Preset mutations verify the guarded
+FX identity and execute in one named undo block.
+
 Markers and regions use REAPER marker and region IDs. Delete tools accept
 optional expected names and timeline positions to guard against stale IDs before
 the bridge mutates the project.
@@ -328,20 +426,24 @@ tools remain visible in every profile. `enable_capability` and
 `disable_capability` apply process-local overrides until the active profile
 changes.
 
-`render_project` validates allowed roots and exposes a render job lifecycle. The
-bridge polls for a non-empty, stable output file, restores render settings, and
-verifies the project dirty state before returning success. A job that remains
-active or loses its bridge heartbeat does not become a successful render merely
-because a WAV appears.
+`render_project` validates allowed roots, snapshots the current project, and
+renders the snapshot in a short-lived REAPER process. It promotes only a
+non-empty WAV after the process exits successfully, preserves the project dirty
+state, and reports overwrite behavior. The native render job lifecycle remains
+experimental because action `42230` can block the Lua bridge.
 
-## Next steps
+## Release status
 
-All 99 REAPER-backed non-render tools have passed the live acceptance matrix in
-the [product reality audit](docs/reaper-mcp-product-reality-audit.md). The Linux
-package and bridge installer form the `0.1.0` release candidate. Rendering
-continues as an independent experimental track and does not block the accepted
-core release. The remaining product work is render reliability and live
-verification on macOS and Windows.
+The original 99 REAPER-backed core tools and the producer-expansion bridge
+commands have passed the Linux live acceptance matrix. Take loudness uses the
+non-modal approved-WAV analysis path because REAPER's native dry-run calculation
+opens a modal render-results window.
+`set_fx_preset` and the preset index tools are implemented and unit-covered but
+remain unverified on this REAPER profile because the installed test FX exposed
+no preset to set.
+Isolated `render_project` passed Linux live checks for completion, dirty-state
+preservation, bridge responsiveness, overwrite rejection, and overwrite
+success. Native render lifecycle tools remain experimental.
 
 ## License and attribution
 

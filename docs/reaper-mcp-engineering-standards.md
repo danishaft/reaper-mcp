@@ -240,6 +240,8 @@ Rules:
   calls.
 - Reject render output paths outside configured allowed roots before bridge
   calls.
+- Reject template and audio-analysis paths outside their configured allowed
+  roots before filesystem or bridge calls.
 - Use defaults only when they are safe and unsurprising.
 - Return structured results instead of free-form strings.
 - Keep raw ReaScript payloads behind dedicated raw proxy models.
@@ -448,12 +450,12 @@ Required profiles:
 - `production`.
 - `midi`.
 
-Deferred profiles:
+Additional profiles:
 
 - `mixing`.
-- `rendering`.
-- `advanced`.
-- `raw-reascript`.
+- `full`.
+
+Experimental rendering remains a capability rather than a default profile.
 
 Required capability tools:
 
@@ -548,6 +550,7 @@ Required settings:
 - `REAPER_MCP_LOG_LEVEL`.
 - `REAPER_MCP_ALLOWED_RENDER_ROOTS`.
 - `REAPER_MCP_TRANSPORT`.
+- `REAPER_MCP_HTTP_HOST` and `REAPER_MCP_HTTP_PORT` when HTTP transport is used.
 - `REAPER_MCP_BRIDGE_TIMEOUT_SECONDS`.
 
 Startup diagnostics must report:
@@ -555,6 +558,7 @@ Startup diagnostics must report:
 - The active profile.
 - The bridge directory.
 - The selected transport.
+- The HTTP bind address and port when HTTP transport is selected.
 - Whether the bridge health check passes.
 - The configured allowed render roots.
 

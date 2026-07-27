@@ -223,6 +223,7 @@ Tasks:
 - Implement `set_fx_enabled`.
 - Implement `get_fx_parameters`.
 - Implement `set_fx_parameter`.
+- Implement guarded FX preset name, index, and navigation tools.
 - Implement `create_marker`.
 - Implement `list_markers`.
 - Implement `delete_marker`.
@@ -256,8 +257,8 @@ Goals:
 Tasks:
 
 - Define allowed render root configuration.
-- Require an explicit operator confirmation that REAPER background rendering is
-  enabled before invoking the render bridge path.
+- Use an isolated REAPER process for confirmed project renders; require an
+  explicit operator confirmation only for the native fallback path.
 - Implement the `render_project` job lifecycle with status and result polling.
 - Snapshot, apply, restore, and verify render settings and project dirty state.
 - Require a stable, non-empty output file before success.
@@ -298,12 +299,20 @@ Tasks:
 - Add a packaged `reaper-mcp-install` command.
 - Add focused installer tests.
 - Add concise MCP client configuration examples.
+- Add an optional loopback-only REST adapter over the existing MCP server.
+- Add REST discovery and tool-call contract tests.
+- Add a complete CLI adapter with generic tool dispatch and producer aliases.
+- Add CLI output and exit-code tests.
 
 Exit criteria:
 
 - A source checkout and built package can install the bridge.
 - Re-running the installer is deterministic.
 - A user can start the server with `reaper-mcp`.
+- A local script can discover and call visible tools over HTTP without a second
+  business-logic path.
+- A shell user can discover and call every visible tool without a second
+  business-logic path.
 
 ## Phase 8: Essential competitor parity
 
@@ -358,14 +367,23 @@ Accepted capabilities:
 - Built-in track automation envelopes and guarded points.
 - Take management and guarded crop-to-active-take comping.
 - Project save, cursor, time selection, and loop controls.
+- MIDI controller event editing with guarded identities.
+- Tempo-map marker editing with guarded identities.
+- Grid, metronome, playback-rate, undo, and redo controls.
+- Track recording and folder-depth controls.
+- FX preset reads/writes, FX movement, and FX-chain copying.
+- Sidechain send setup with explicit source and destination channels.
+- Track-template file operations with approved-root policies.
+- Preflighted batch track updates.
+- Read-only PCM WAV analysis with approved-root policies.
+- Deterministic chord and arpeggio MIDI pattern generation.
+- Guarded take-FX listing and mutation.
 
 Deferred candidates:
 
 - Project open and project tabs.
-- Take FX.
-- Bus and sidechain workflow helpers.
-- FX presets and FX chain movement.
-- Peak metering and audio analysis.
+- Advanced bus topology beyond the guarded sidechain helper.
+- LUFS, true-peak, and REAPER-native live metering.
 - Action management.
 - Project tabs.
 - Layouts and screensets.
@@ -383,6 +401,8 @@ Accepted scope:
   automation, takes, comping, navigation, and saving.
 - Five profile management tools filter discovery and reject calls to hidden
   tools. The default profile excludes experimental rendering.
+- The production profile exposes 142 stable tools; the full profile exposes 146
+  including the four experimental render tools.
 
 Exit criteria:
 
@@ -412,8 +432,8 @@ Exit criteria:
 
 - A new user can install the server and bridge from docs.
 - Unit tests and the Linux REAPER acceptance suite pass.
-- Rendering is either live-accepted or clearly excluded from the stable
-  profile without blocking the release.
+- Isolated project rendering is live-accepted, and native lifecycle tools are
+  clearly excluded from the stable profile without blocking the release.
 - The package has a versioned release.
 
 ## Test strategy
@@ -453,10 +473,12 @@ Manual tests:
 
 The first public release must be small and dependable.
 
-The next release is `0.1.0`. It registers 108 tools, exposes 104 through the
-default production profile, and includes 99 live-accepted non-render bridge
-tools plus five local profile controls. Experimental rendering does not delay
-the release because the production profile excludes it.
+The next release is `0.1.0`. It registers 146 tools, exposes 142 through the
+default production profile, and keeps the four render tools experimental. The
+original 99 non-render bridge tools are live-accepted on Linux; the producer
+expansion commands and isolated project rendering are live-accepted on Linux.
+Audio analysis is unit-tested and approved-WAV live-verified; native render
+lifecycle tools remain outside the stable release claim.
 
 ## Definition of done
 
@@ -473,6 +495,7 @@ Each phase requires:
 ## Next steps
 
 The packaged bridge installer, competitor-parity operations, guarded MIDI
-transformations, automation, takes, navigation, saving, and profiles are
-complete on Linux. Test rendering independently, and add macOS and Windows live
-acceptance without blocking the stable Linux core.
+transformations, automation, takes, navigation, saving, profiles, producer
+expansion implementation, local audio analysis, and isolated project rendering
+are complete in code and Linux-verified. Finish the native render lifecycle and
+add macOS and Windows acceptance without blocking the stable Linux core.

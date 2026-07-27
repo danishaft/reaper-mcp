@@ -128,11 +128,13 @@ Lua handles direct ReaScript calls in the REAPER process.
 
 ```mermaid
 graph TB
-    subgraph "MCP clients"
+    subgraph "MCP clients and local integrations"
         Claude[Claude Desktop]
         Cursor[Cursor]
         Codex[Codex]
         Inspector[MCP Inspector]
+        Scripts[Local scripts and apps]
+        CLI[Local CLI]
     end
 
     subgraph "Python MCP server"
@@ -157,6 +159,8 @@ graph TB
     Cursor --> Transport
     Codex --> Transport
     Inspector --> Transport
+    Scripts -->|optional HTTP| Transport
+    CLI -->|direct adapter| Transport
 
     Transport --> Registry
     Registry --> Workflows
@@ -187,9 +191,17 @@ The transport layer owns client communication.
 Responsibilities:
 
 - Start the MCP server over `stdio`.
-- Support optional local HTTP transport.
+- Support optional loopback-only HTTP transport.
 - Convert MCP tool calls into internal command calls.
 - Keep transport concerns separate from REAPER bridge concerns.
+
+The optional REST adapter exposes tool discovery and tool calls for local
+scripts and applications. It calls the same profiled MCP server, so it does
+not create a second business-logic or safety path.
+
+The CLI adapter provides the same complete tool surface for shell users. Its
+generic `call` command covers every visible tool, while common producer
+operations have shorter aliases.
 
 ### Tool registry
 
@@ -370,10 +382,12 @@ Required meta-tools:
 - `get_active_profile`
 - `set_active_profile`
 
-Implemented capabilities cover core diagnostics, tracks, media, MIDI,
-transport, FX, freeze, arrangement, automation, tempo, takes, navigation,
-routing, workflows, and rendering. Project tabs and raw ReaScript access remain
-future capabilities.
+Implemented capabilities cover core diagnostics, tracks, media, MIDI notes and
+controller events, transport, FX and presets, freeze, arrangement, automation,
+tempo and tempo-map markers, takes, navigation and project controls, routing
+and guarded sidechain setup, workflows, templates, batch updates, and local
+audio analysis. Project tabs, raw ReaScript access, and experimental rendering
+remain separately gated.
 
 ## Identity model
 
@@ -539,6 +553,8 @@ Recommended settings:
 - `REAPER_MCP_LOG_LEVEL`
 - `REAPER_MCP_ALLOWED_RENDER_ROOTS`
 - `REAPER_MCP_TRANSPORT`
+- `REAPER_MCP_HTTP_HOST` and `REAPER_MCP_HTTP_PORT` for the optional local HTTP
+  transport
 - `REAPER_MCP_BRIDGE_TIMEOUT_SECONDS`
 
 The server must provide safe defaults and print clear setup diagnostics when
@@ -589,11 +605,8 @@ Future work expands the product after the MVP is stable.
 
 Candidate capabilities:
 
-- Advanced routing and sends.
-- Automation envelope editing.
-- Take management and comping helpers.
-- Additional groove templates beyond the accepted guarded MIDI transformations.
-- Audio analysis and peak extraction.
+- Advanced routing topology beyond guarded sends and sidechain setup.
+- LUFS, true-peak, and REAPER-native live metering.
 - Project tab management.
 - Action list search and execution.
 - Script extension detection.
@@ -634,7 +647,8 @@ These decisions need validation during implementation.
 - Which REAPER versions become the supported baseline?
 - Which operating systems are tested first?
 - Which MCP clients are part of the initial compatibility matrix?
-- Does the MVP include HTTP transport or only `stdio`?
+- HTTP transport is available as an optional loopback-only integration mode;
+  `stdio` remains the default MCP transport.
 - How much raw ReaScript coverage is required before public release?
 - What render path policy is strict enough without being annoying?
 

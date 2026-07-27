@@ -6,7 +6,7 @@ of truth for the repeatable integration suite and retained manual evidence.
 
 > **Note:** This is a preview feature currently under active development.
 
-Audit date: July 19, 2026.
+Audit date: July 25, 2026.
 
 ## How to read this audit
 
@@ -26,20 +26,22 @@ until its required live checks pass and the evidence is recorded here.
 
 ## Current conclusion
 
-The repository is a Linux-verified `0.1.0` release candidate. It registers 108
-MCP tools and exposes 104 in the default `production` profile. It has 129
-passing unit tests and nine opt-in integration buckets. The current bridge live
-score is 99 passed, 2 partial, 2 blocked, and 0 unverified. Five local profile
-tools also pass discovery and call-gating tests. Every production-profile tool
-has therefore passed at its required evidence level; rendering remains the only
-unaccepted group and is hidden by default.
+The repository is a Linux-verified `0.1.0` release candidate. It registers 146
+MCP tools and exposes 142 in the default `production` profile. It has 153
+passing unit tests and ten opt-in integration buckets. The current non-render
+bridge live score is 130 passed, with `set_fx_preset` still unverified on this
+REAPER profile because the installed test FX exposed no preset to set. Five
+local profile tools also pass discovery and call-gating tests. Audio analysis
+is covered by local unit tests because it operates on approved files outside
+REAPER. Isolated `render_project` is live-accepted; native render lifecycle
+tools remain blocked and hidden by default.
 
-Full-project rendering is not live-accepted. The tested REAPER profile has
+The native render lifecycle is not live-accepted. The tested REAPER profile has
 background rendering disabled, and the earlier smoke showed that action `42230`
-can create a WAV while blocking the Lua bridge before it returns. The server now
-requires explicit background-render confirmation before invoking that path, so a
-normal MCP call fails closed instead of blocking. No confirmed completed MCP
-render result has been recorded yet.
+can create a WAV while blocking the Lua bridge before it returns. The isolated
+external renderer now has a confirmed completed result, dirty-state check,
+overwrite check, and bridge-responsiveness check. Native lifecycle tools still
+require explicit background-render confirmation and remain experimental.
 
 ## Phase status
 
@@ -53,16 +55,18 @@ This table replaces phase completion inferred from code or unit tests.
 | 3. Project, tracks, transport | Present | All tools and track undo passed | Accepted on REAPER 7.66 Linux |
 | 4. MIDI and media | Present | All tools, guards, paths, and undo-redo passed | Accepted on REAPER 7.66 Linux |
 | 5. FX and arrangement | Present | All FX, arrangement, and tempo checks passed | Accepted on REAPER 7.66 Linux |
-| 6. Rendering | Partial | Blocked path passed; allowed render hung | Blocked |
+| 6. Rendering | External project render present; native lifecycle partial | Isolated external render and overwrite passed; native `42230` path blocked | Partially accepted |
 | 7. Installation and release surface | Package and installer present | Linux artifacts and install passed | Accepted on Linux |
 | 8. Essential competitor parity | Present | Item editing, routing, freeze, and workflow passed | Accepted on REAPER 7.66 Linux |
-| 9. Producer expansion | Automation, takes, navigation, and profiles present | 26 bridge tools passed; five profile tools passed locally | Accepted on REAPER 7.66 Linux |
+| 9. Producer expansion | Automation, takes, navigation, profiles, and producer expansion present | 52 bridge operations passed across the two expansion runs; five profile tools passed locally | Accepted on REAPER 7.66 Linux |
 | 10. v0.1 release | Artifacts present | Source, wheel, and installed bridge verified | Release candidate verified |
 
 ## Tool acceptance matrix
 
-Every currently exposed MCP tool appears below. Live statuses come only from
-the retained smoke-test reports in the project work session.
+The historical matrix below covers the original core surface. The producer
+expansion additions are recorded in their own matrix because they were added
+after the original acceptance run. Live statuses come only from retained
+smoke-test reports.
 
 ### Health and diagnostics
 
@@ -268,17 +272,15 @@ identity. This improves on the index-only reference implementation.
 
 ### Render tools
 
-Render path validation and the deferred job contract are implemented, but render
-execution is not live-accepted. These tools remain preview-only until REAPER
-background rendering is enabled and a confirmed MCP result proves completion,
-restoration, overwrite behavior, and bridge responsiveness.
+The isolated `render_project` path is live-accepted. The native deferred job
+contract remains preview-only because action `42230` can block the Lua bridge.
 
 | Tool | Unit covered | Live status | Evidence or required check |
 | --- | --- | --- | --- |
-| `render_project` | Yes | Blocked | Earlier confirmed path created a WAV but action `42230` blocked the bridge |
-| `render_project_start` | Yes | Partial | Returned a job before the earlier bridge block; guarded path needs a rerun |
-| `render_project_status` | Yes | Partial | Reported the blocked job as running without claiming success |
-| `render_project_result` | Yes | Blocked | No completed result with restoration evidence exists |
+| `render_project` | Yes | Passed | Isolated REAPER process completed a WAV render and preserved state |
+| `render_project_start` | Yes | Experimental | Native job start remains tied to the blocked `42230` path |
+| `render_project_status` | Yes | Experimental | Native job status remains available for recovery diagnostics |
+| `render_project_result` | Yes | Experimental | Native completed-result evidence is still required |
 
 ### Workflow tools
 
@@ -302,15 +304,35 @@ freeze count changed before reporting success.
 | `freeze_track` | Yes | Passed | Froze a WAV track, restored selection, stayed responsive, and undid-redid |
 | `unfreeze_track` | Yes | Passed | Unfroze by GUID, restored selection, stayed responsive, and undid-redid |
 
+### Producer expansion additions
+
+The July 25 isolated run covered the following new commands; local and
+unverified exceptions are called out explicitly.
+
+| Capability | Tools | Unit covered | Live status |
+| --- | --- | --- | --- |
+| MIDI controllers | `list_midi_controller_events`, `add_midi_controller_events`, `update_midi_controller_event`, `delete_midi_controller_events` | Yes | Passed |
+| Tempo map | `list_tempo_markers`, `create_tempo_marker`, `update_tempo_marker`, `delete_tempo_marker` | Yes | Passed |
+| Project controls | `undo`, `redo`, `get_grid_settings`, `set_grid_settings`, `get_metronome`, `set_metronome`, `get_playback_rate`, `set_playback_rate` | Yes | Passed |
+| Track structure and batch | `set_track_recording`, `set_track_folder_depth`, `batch_update_tracks` | Yes | Passed |
+| MIDI patterns | `create_midi_pattern` | Yes | Passed for deterministic chord and arpeggio generation |
+| Take FX | `list_take_fx`, `add_take_fx`, `remove_take_fx`, `set_take_fx_enabled` | Yes | Passed with guarded take identities and undoable mutations |
+| FX workflow | `get_fx_preset`, `set_fx_preset`, `get_fx_preset_index`, `set_fx_preset_index`, `navigate_fx_presets`, `move_fx`, `copy_fx_chain` | Yes | Partial: read, movement, and copy passed; preset mutations remain unverified because the test FX exposed no preset |
+| Sidechain | `setup_sidechain` | Yes | Passed |
+| Track templates | `list_track_templates`, `save_track_template`, `apply_track_template`, `delete_track_template` | Yes | Save, apply, and delete passed; listing is local filesystem coverage |
+| Audio analysis | `analyze_audio_file`, `calculate_take_loudness` | Yes | Approved-WAV level analysis passed live through a REAPER take; native modal LUFS statistics remain intentionally excluded |
+
 ## Known limitations and remaining work
 
 These issues remain outside the accepted Linux non-render core.
 
 - The tested REAPER profile has background rendering disabled, so action `42230`
   must not be invoked until the operator enables and confirms that preference.
-- A live completed render result, restoration check, and overwrite smoke are
-  still required before render execution can be accepted.
-- The nine opt-in integration tests require a local isolated REAPER instance
+- Native render job start, status, result, and fallback recovery remain
+  unaccepted until the bridge stays responsive through action `42230`.
+- `set_fx_preset` needs a live test FX with an available preset before it can be
+  called accepted.
+- The ten opt-in integration tests require a local isolated REAPER instance
   and are not part of the default unit-test run.
 - The packaged bridge installer has unit coverage on Linux, macOS, and Windows
   path conventions. Installation and idempotent reinstallation passed against
@@ -376,9 +398,11 @@ each consolidated REAPER run.
 | July 18, 2026 | GUID-based media-item editing on REAPER 7.66 Linux | Passed | Duplicate, split, mute, gain, fades, selection restoration, preflight rejection, stable identities, and undo-redo passed |
 | July 19, 2026 | Full installed-bridge acceptance on REAPER 7.66 Linux | Passed | All eight groups and 73 non-render tools passed in 106.02 seconds, including seven MIDI transforms, insertion identity, and undo-redo |
 | July 19, 2026 | Producer expansion on REAPER 7.66 Linux | Passed | Automation creation and scaled point edits, take comping, cursor and loop state, allowed-root save-as, and 108-tool profile discovery passed |
+| July 25, 2026 | Producer expansion completion on REAPER 7.66 Linux | Passed with one unverified setter | Producer expansion bucket passed, including MIDI patterns and take FX; `set_fx_preset` had no available test preset |
+| July 25, 2026 | Isolated external project render on REAPER 7.66 Linux | Passed | Completed WAV render, dirty-state preservation, bridge responsiveness, overwrite rejection, and overwrite success |
 
 ## Next steps
 
-Keep rendering experimental until a confirmed result leaves the bridge
-responsive. Add macOS and Windows live acceptance after the Linux release
-candidate remains stable under producer use.
+Keep the native render lifecycle experimental until a confirmed result leaves
+the bridge responsive. Add macOS and Windows live acceptance after the Linux
+release candidate remains stable under producer use.
