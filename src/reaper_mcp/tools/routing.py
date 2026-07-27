@@ -82,3 +82,19 @@ def register_routing_tools(server: FastMCP, service: RoutingService) -> None:
             send_index,
             expected_destination_track_guid,
         )
+
+    @server.tool(
+        name="setup_sidechain",
+        description=(
+            "Create a guarded source-to-destination sidechain send on channels "
+            "3/4 in one named undo block."
+        ),
+    )
+    async def setup_sidechain(
+        source_track_guid: str,
+        destination_track_guid: str,
+        amount: float = 1.0,
+    ) -> dict[str, Any]:
+        return await service.setup_sidechain(
+            source_track_guid, destination_track_guid, amount
+        )

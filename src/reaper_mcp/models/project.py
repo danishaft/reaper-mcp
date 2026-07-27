@@ -47,6 +47,9 @@ class TrackSnapshot(BaseModel):
     armed: bool = False
     selected: bool = False
     media_item_count: int = 0
+    folder_depth: int = 0
+    recording_input: int = -1
+    input_monitoring: bool = False
 
 
 class MarkerSnapshot(BaseModel):
@@ -159,6 +162,19 @@ class SetTrackPanRequest(TrackGuidRequest):
     """Input for setting REAPER track pan."""
 
     pan: float = Field(ge=-1.0, le=1.0)
+
+
+class SetTrackRecordingRequest(TrackGuidRequest):
+    """Input for setting track recording input and monitoring."""
+
+    recording_input: int = Field(ge=-1, le=256)
+    input_monitoring: bool = False
+
+
+class SetTrackFolderDepthRequest(TrackGuidRequest):
+    """Input for setting one track's folder depth."""
+
+    folder_depth: int = Field(ge=-1, le=1)
 
 
 class TrackMutationResult(BaseModel):

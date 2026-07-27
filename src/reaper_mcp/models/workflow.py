@@ -10,6 +10,7 @@ from reaper_mcp.models.project import TrackSnapshot
 
 SongStarterMode = Literal["major", "minor"]
 SongStarterRole = Literal["drums", "bass", "chords", "lead"]
+MidiPatternType = Literal["chord_progression", "arpeggio"]
 
 
 class CreateSongStarterRequest(BaseModel):
@@ -33,6 +34,40 @@ class CreateSongStarterRequest(BaseModel):
             msg = "Song starter name must contain a visible character."
             raise ValueError(msg)
         return normalized
+
+
+class CreateMidiPatternRequest(BaseModel):
+    """Input for creating a bounded musical MIDI pattern on an existing track."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    track_guid: str = Field(min_length=1)
+    pattern: MidiPatternType
+    start_measure: int = Field(default=1, ge=1, le=9999)
+    bars: int = Field(default=8, ge=1, le=64)
+    root_note: int = Field(default=60, ge=36, le=84)
+    mode: SongStarterMode = "major"
+    subdivision_beats: float = Field(default=0.5, ge=0.25, le=2.0)
+
+    @model_validator(mode="after")
+    def require_supported_subdivision(self) -> "CreateMidiPatternRequest":
+        if self.subdivision_beats not in {0.25, 0.5, 1.0, 2.0}:
+            raise ValueError("subdivision_beats must be 0.25, 0.5, 1.0, or 2.0")
+        return self
+
+
+class CreateMidiPatternResult(BaseModel):
+    """Result returned after creating one musical MIDI pattern."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    pattern: MidiPatternType
+    track_guid: str = Field(min_length=1)
+    item: MediaItemSnapshot
+    note_count: int = Field(ge=1)
+    start_measure: int = Field(ge=1)
+    bars: int = Field(ge=1)
+    changes_applied: bool = True
 
 
 class SongStarterPart(BaseModel):

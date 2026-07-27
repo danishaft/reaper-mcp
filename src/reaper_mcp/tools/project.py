@@ -121,6 +121,34 @@ def register_project_tools(server: FastMCP, service: ProjectService) -> None:
         return await service.set_track_pan(track_guid=track_guid, pan=pan)
 
     @server.tool(
+        name="set_track_recording",
+        description=(
+            "Set one track's recording input and input monitoring by stable GUID. "
+            "This mutates the project in one named undo block."
+        ),
+    )
+    async def set_track_recording(
+        track_guid: str,
+        recording_input: int,
+        input_monitoring: bool = False,
+    ) -> dict[str, Any]:
+        return await service.set_track_recording(
+            track_guid, recording_input, input_monitoring
+        )
+
+    @server.tool(
+        name="set_track_folder_depth",
+        description=(
+            "Set a track's folder depth to -1, 0, or 1 by stable GUID. "
+            "This mutates the project in one named undo block."
+        ),
+    )
+    async def set_track_folder_depth(
+        track_guid: str, folder_depth: int
+    ) -> dict[str, Any]:
+        return await service.set_track_folder_depth(track_guid, folder_depth)
+
+    @server.tool(
         name="delete_track",
         description=(
             "Delete one REAPER track by stable track GUID. "

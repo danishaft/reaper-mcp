@@ -116,3 +116,16 @@ class RemoveTrackSendResult(BaseModel):
     removed_index: int = Field(ge=0)
     send_count: int = Field(ge=0)
     changes_applied: bool = True
+
+
+class SidechainResult(BaseModel):
+    """Result returned after creating a sidechain send."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_track_guid: str = Field(min_length=1)
+    destination_track_guid: str = Field(min_length=1)
+    send: TrackSendSnapshot
+    source_channels: str = "1/2"
+    destination_channels: str = "3/4"
+    changes_applied: bool = True

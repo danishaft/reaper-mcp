@@ -20,8 +20,10 @@ from reaper_mcp.models.project import (
     SetMasterVolumeRequest,
     SetTrackArmRequest,
     SetTrackColorRequest,
+    SetTrackFolderDepthRequest,
     SetTrackMuteRequest,
     SetTrackPanRequest,
+    SetTrackRecordingRequest,
     SetTrackSoloRequest,
     SetTrackVolumeRequest,
     TrackGuidRequest,
@@ -207,6 +209,45 @@ class ProjectService:
             command="set_track_pan",
             args=request.model_dump(mode="json"),
             undo_label="Set track pan",
+        )
+
+    async def set_track_recording(
+        self,
+        track_guid: str,
+        recording_input: int,
+        input_monitoring: bool = False,
+    ) -> dict[str, Any]:
+        """Set one track's recording input and monitoring state."""
+
+        try:
+            request = SetTrackRecordingRequest(
+                track_guid=track_guid,
+                recording_input=recording_input,
+                input_monitoring=input_monitoring,
+            )
+        except ValidationError as exc:
+            return self._validation_error_result(exc)
+        return await self._execute_track_mutation(
+            command="set_track_recording",
+            args=request.model_dump(mode="json"),
+            undo_label="Set track recording input",
+        )
+
+    async def set_track_folder_depth(
+        self, track_guid: str, folder_depth: int
+    ) -> dict[str, Any]:
+        """Set one track's REAPER folder depth."""
+
+        try:
+            request = SetTrackFolderDepthRequest(
+                track_guid=track_guid, folder_depth=folder_depth
+            )
+        except ValidationError as exc:
+            return self._validation_error_result(exc)
+        return await self._execute_track_mutation(
+            command="set_track_folder_depth",
+            args=request.model_dump(mode="json"),
+            undo_label="Set track folder depth",
         )
 
     async def get_master_track(self) -> dict[str, Any]:

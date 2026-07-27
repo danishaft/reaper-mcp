@@ -14,6 +14,7 @@ from reaper_mcp.models.routing import (
     RemoveTrackSendResult,
     SetTrackSendRequest,
     SetTrackSendResult,
+    SidechainResult,
     TrackSendIdentity,
     TrackSendList,
 )
@@ -168,6 +169,42 @@ class RoutingService:
             return self._error_result(response)
         try:
             result = RemoveTrackSendResult.model_validate(response.result or {})
+        except ValidationError as exc:
+            return self._invalid_payload_result(response, exc)
+        return {
+            "ok": True,
+            **result.model_dump(mode="json"),
+            "warnings": response.warnings,
+        }
+
+    async def setup_sidechain(
+        self,
+        source_track_guid: str,
+        destination_track_guid: str,
+        amount: float = 1.0,
+    ) -> dict[str, Any]:
+        """Create a source-to-destination sidechain send on channels 3/4."""
+
+        try:
+            request = CreateTrackSendRequest(
+                source_track_guid=source_track_guid,
+                destination_track_guid=destination_track_guid,
+                volume=amount,
+            )
+        except ValidationError as exc:
+            return self._validation_error_result(exc)
+        response = await self.bridge_client.execute(
+            "setup_sidechain",
+            args=request.model_dump(mode="json"),
+            options=CommandOptions(
+                mutates_project=True,
+                undo_label="Setup sidechain",
+            ),
+        )
+        if not response.ok:
+            return self._error_result(response)
+        try:
+            result = SidechainResult.model_validate(response.result or {})
         except ValidationError as exc:
             return self._invalid_payload_result(response, exc)
         return {

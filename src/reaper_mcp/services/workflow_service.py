@@ -8,6 +8,8 @@ from reaper_mcp.bridge.base import BridgeClient
 from reaper_mcp.errors import ErrorCode
 from reaper_mcp.models.bridge import BridgeResponse, CommandOptions, ErrorResponse
 from reaper_mcp.models.workflow import (
+    CreateMidiPatternRequest,
+    CreateMidiPatternResult,
     CreateSongStarterRequest,
     CreateSongStarterResult,
     SongStarterMode,
@@ -19,6 +21,51 @@ class WorkflowService:
 
     def __init__(self, bridge_client: BridgeClient) -> None:
         self.bridge_client = bridge_client
+
+    async def create_midi_pattern(
+        self,
+        track_guid: str,
+        pattern: str,
+        start_measure: int = 1,
+        bars: int = 8,
+        root_note: int = 60,
+        mode: SongStarterMode = "major",
+        subdivision_beats: float = 0.5,
+    ) -> dict[str, Any]:
+        """Create a deterministic chord or arpeggio pattern on one track."""
+
+        try:
+            request = CreateMidiPatternRequest(
+                track_guid=track_guid,
+                pattern=pattern,
+                start_measure=start_measure,
+                bars=bars,
+                root_note=root_note,
+                mode=mode,
+                subdivision_beats=subdivision_beats,
+            )
+        except ValidationError as exc:
+            return self._validation_error_result(exc)
+
+        response = await self.bridge_client.execute(
+            "create_midi_pattern",
+            args=request.model_dump(mode="json"),
+            options=CommandOptions(
+                mutates_project=True,
+                undo_label=f"Create MIDI {request.pattern}",
+            ),
+        )
+        if not response.ok:
+            return self._error_result(response)
+        try:
+            result = CreateMidiPatternResult.model_validate(response.result or {})
+        except ValidationError as exc:
+            return self._invalid_payload_result(response, exc)
+        return {
+            "ok": True,
+            **result.model_dump(mode="json"),
+            "warnings": response.warnings,
+        }
 
     async def create_song_starter(
         self,
