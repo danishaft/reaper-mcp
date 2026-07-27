@@ -30,9 +30,7 @@
 <p align="center">
   <a href="#quick-start">Quick start</a> ·
   <a href="#interfaces">Interfaces</a> ·
-  <a href="docs/reaper-mcp-product-architecture-spec.md">Architecture</a> ·
-  <a href="docs/reaper-mcp-product-reality-audit.md">Acceptance audit</a>
-  · <a href="CONTRIBUTING.md">Contributing</a>
+  <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
 ## What it is
@@ -266,7 +264,7 @@ Runtime settings use the `REAPER_MCP_` prefix. The important paths are:
 | `REAPER_MCP_ALLOWED_AUDIO_ROOTS` | WAV files allowed for analysis |
 | `REAPER_MCP_REAPER_EXECUTABLE` | REAPER binary used by isolated rendering |
 
-All allowlists default to empty. See the [full configuration](README.md#configuration)
+All allowlists default to empty. See the [full configuration](#configuration)
 and [engineering standards](docs/reaper-mcp-engineering-standards.md) for the
 complete configuration contract.
 
@@ -277,56 +275,26 @@ REAPER. MCP, CLI, and REST calls converge on the same tool registry, services,
 validation, safety rules, and bridge client. An interface never gets a separate
 implementation of a DAW operation.
 
-```mermaid
-flowchart LR
-    subgraph Clients["Client interfaces"]
-        MCP[MCP clients]
-        CLI[CLI]
-        REST[Loopback REST]
-    end
+[![REAPER MCP system architecture overview](assets/reaper-mcp-system-architecture.png)](assets/reaper-mcp-system-architecture.svg)
 
-    subgraph Python["Python control plane"]
-        Adapters["Protocol adapters"]
-        Registry["Tool registry<br/>profiles and capability gates"]
-        Tools["Thin tools<br/>request and result schemas"]
-        Services["Domain services and workflows<br/>producer operations"]
-        Safety["Validation and safety<br/>GUIDs, paths, dry-run, undo intent"]
-        Bridge["BridgeClient<br/>atomic JSON, timeouts, cleanup"]
-        Files[("Bridge directories<br/>requests / responses / jobs")]
-    end
-
-    subgraph Reaper["REAPER process"]
-        Lua["Deferred Lua bridge<br/>heartbeat and dispatcher"]
-        API["ReaScript API"]
-        Project[("Active REAPER project")]
-    end
-
-    MCP --> Adapters
-    CLI --> Adapters
-    REST --> Adapters
-    Adapters --> Registry --> Tools --> Services --> Safety --> Bridge
-    Bridge <-->|"JSON request / response files"| Files
-    Files <-->|"poll and write"| Lua
-    Lua --> API --> Project
-    Lua -.->|"job progress and completion"| Files
-
-    classDef boundary fill:#172033,stroke:#55d6ff,color:#ffffff
-    classDef safety fill:#33250f,stroke:#f2b84b,color:#ffffff
-    class Registry,Tools,Services,Bridge,Lua boundary
-    class Safety safety
-```
+Open the image for the full-resolution architecture map. The overview also has
+a version-controlled
+[Mermaid source](docs/diagrams/reaper-mcp-system-architecture.mmd) and a native
+editable
+[Excalidraw board](docs/diagrams/reaper-mcp-system-architecture.excalidraw).
 
 ### What happens on a tool call
 
 1. The client calls a visible tool through MCP, the CLI, or loopback REST.
 2. The profile and capability gate decide whether that tool is exposed.
-3. The tool and service validate the request, resolve stable REAPER GUIDs, and
-   enforce path and mutation policies before touching REAPER.
+3. The tool and service validate the request and enforce path and mutation
+   policies before bridge execution.
 4. The bridge client writes an atomic JSON envelope with a request ID,
    mutation classification, dry-run flag, and undo label.
 5. The Lua bridge polls the request, validates it again at the REAPER boundary,
-   resolves GUIDs, executes the ReaScript operation, and writes a structured
-   response. Mutating commands run inside one REAPER undo block.
+   resolves GUIDs against current project state, executes the ReaScript
+   operation, and writes a structured response. Mutating commands run inside
+   one REAPER undo block.
 6. Python normalizes the response or stable error, then returns it unchanged in
    meaning through the selected interface.
 
@@ -348,10 +316,8 @@ This split makes the important guarantees visible: all interfaces share one
 behavior path, invalid or disallowed work is rejected before bridge execution,
 and every response identifies what actually happened.
 
-Read the [product and architecture specification](docs/reaper-mcp-product-architecture-spec.md)
-for the full component model and request flow. The [implementation roadmap](docs/reaper-mcp-implementation-roadmap.md)
-tracks the release work. The [product reality audit](docs/reaper-mcp-product-reality-audit.md)
-separates implemented, unit-tested, and live-accepted behavior.
+Git history preserves the delivery sequence. Executable unit and opt-in
+integration tests provide the verification record.
 
 ## Verification and limitations
 
@@ -388,8 +354,8 @@ Known limitations are deliberate and documented:
 - Plugin UI automation, audio-rate control, and cloud collaboration are out
   of scope.
 
-See the [product reality audit](docs/reaper-mcp-product-reality-audit.md) for
-the complete acceptance matrix and retained test evidence.
+The opt-in suite under [`tests/integration/`](tests/integration/) is the
+executable source for live REAPER acceptance.
 
 ## Demo projects
 
@@ -418,7 +384,7 @@ REAPER execution, tests, and release documentation.
 |-- tests/
 |   |-- unit/                 tests without REAPER
 |   `-- integration/          opt-in live REAPER acceptance
-|-- docs/                     product, architecture, roadmap, and audit
+|-- docs/                     engineering standards and architecture sources
 |-- demo/                     local producer workflow fixtures
 |-- assets/                   README and product media
 |-- .github/workflows/

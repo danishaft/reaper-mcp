@@ -5,6 +5,7 @@ __pycache__/
 *.py[cod]
 dist/
 *.egg-info/
+.private/
 
 # Local bridge, test, and render artifacts
 reaper-mcp-bridge/

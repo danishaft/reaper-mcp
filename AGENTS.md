@@ -1,17 +1,15 @@
 # Project agent instructions
 
-These instructions apply to this repository. Use them together with the product
-and engineering documents in `docs/` before making implementation decisions.
+These instructions apply to this repository. Use them together with the
+engineering standard before making implementation decisions.
 
 ## Source of truth
 
 Read these documents before starting non-trivial work:
 
-- `docs/reaper-mcp-product-architecture-spec.md`
-- `docs/reaper-mcp-implementation-roadmap.md`
 - `docs/reaper-mcp-engineering-standards.md`
 
-Keep these documents aligned with implementation decisions. If the code proves
+Keep this document aligned with implementation decisions. If the code proves
 that a documented decision is wrong, update the document in the same change.
 
 ## Engineering standard
