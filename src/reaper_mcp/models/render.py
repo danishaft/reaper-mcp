@@ -116,13 +116,20 @@ class RenderResult(BaseModel):
         if not self.transaction.dirty_state_preserved:
             msg = "Completed renders must preserve project dirty state."
             raise ValueError(msg)
-        required_stages = {
+        actual_stages = {point.stage for point in self.transaction.trace}
+        native_stages = {
             "render_42230_started",
             "render_42230_returned",
             "transaction_verified",
         }
-        actual_stages = {point.stage for point in self.transaction.trace}
-        if not required_stages.issubset(actual_stages):
+        external_stages = {
+            "render_external_started",
+            "render_external_returned",
+            "transaction_verified",
+        }
+        if not native_stages.issubset(actual_stages) and not external_stages.issubset(
+            actual_stages
+        ):
             msg = (
                 "Completed renders must include start, return, and verification "
                 "trace points."

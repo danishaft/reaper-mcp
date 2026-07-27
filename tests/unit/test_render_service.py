@@ -185,6 +185,61 @@ async def test_render_service_renders_project_to_allowed_output(
     assert result["render"]["output_files"][0]["size_bytes"] == 128
 
 
+async def test_render_service_uses_isolated_reaper_process(tmp_path: Path) -> None:
+    output_path = tmp_path / "isolated.wav"
+    executable = tmp_path / "fake-reaper"
+    executable.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        "from pathlib import Path\n"
+        "snapshot = Path(sys.argv[-1])\n"
+        "(snapshot.parent / 'isolated.wav').write_bytes(b'RIFF')\n",
+        encoding="utf-8",
+    )
+    executable.chmod(0o755)
+    bridge = FakeBridgeClient(
+        BridgeResponse(
+            id="request-1",
+            ok=True,
+            result={
+                "status": "prepared",
+                "transaction": {
+                    "settings_restored": True,
+                    "dirty_state_before": False,
+                    "dirty_state_after": False,
+                    "dirty_state_preserved": True,
+                    "output_overwritten": False,
+                    "trace": [
+                        {"stage": "snapshot_captured", "elapsed_ms": 0},
+                        {"stage": "snapshot_saved", "elapsed_ms": 1},
+                    ],
+                },
+            },
+        )
+    )
+    service = RenderService(
+        bridge,
+        allowed_render_roots=[tmp_path],
+        external_render_enabled=True,
+        reaper_executable=executable,
+    )
+
+    result = await service.render_project(str(output_path))
+
+    assert result["ok"] is True
+    assert output_path.read_bytes() == b"RIFF"
+    assert {point["stage"] for point in result["render"]["transaction"]["trace"]} >= {
+        "render_external_started",
+        "render_external_returned",
+        "transaction_verified",
+    }
+
+    overwritten = await service.render_project(str(output_path), overwrite=True)
+
+    assert overwritten["ok"] is True
+    assert overwritten["render"]["transaction"]["output_overwritten"] is True
+
+
 async def test_render_service_returns_timeout_then_accepts_late_completion(
     tmp_path: Path,
 ) -> None:

@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import shutil
+import subprocess
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -33,6 +37,8 @@ class RenderService:
         render_timeout_seconds: float = 60.0,
         render_poll_interval_seconds: float = 0.1,
         render_background_confirmed: bool = False,
+        external_render_enabled: bool = False,
+        reaper_executable: Path | None = None,
     ) -> None:
         self.bridge_client = bridge_client
         self.allowed_render_roots = [
@@ -41,6 +47,12 @@ class RenderService:
         self.render_timeout_seconds = render_timeout_seconds
         self.render_poll_interval_seconds = render_poll_interval_seconds
         self.render_background_confirmed = render_background_confirmed
+        self.external_render_enabled = external_render_enabled
+        self.reaper_executable = (
+            reaper_executable.expanduser().resolve(strict=False)
+            if reaper_executable
+            else None
+        )
 
     async def render_project(
         self,
@@ -49,6 +61,9 @@ class RenderService:
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Start a project render and wait for a confirmed result."""
+
+        if self.external_render_enabled:
+            return await self._render_project_external(output_path, overwrite)
 
         started = await self.start_render_project(
             output_path,
@@ -73,6 +88,137 @@ class RenderService:
             await asyncio.sleep(self.render_poll_interval_seconds)
 
         return self._timeout_result(job)
+
+    async def _render_project_external(
+        self, output_path: str, overwrite: bool
+    ) -> dict[str, Any]:
+        """Render an isolated project snapshot in a short-lived REAPER process."""
+
+        if self.bridge_client is None:
+            return self._missing_bridge_result()
+        executable = self._resolve_reaper_executable()
+        if executable is None:
+            return self._render_executable_not_found_result()
+
+        final_plan_result = self.validate_output_path(output_path, overwrite)
+        if not final_plan_result["ok"]:
+            return final_plan_result
+        final_plan = final_plan_result["render_output"]
+        output_directory = Path(final_plan["output_directory"])
+
+        with tempfile.TemporaryDirectory(
+            prefix=".reaper-mcp-render-", dir=output_directory
+        ) as temporary_directory:
+            temporary_root = Path(temporary_directory)
+            temporary_output = temporary_root / final_plan["filename"]
+            snapshot_path = temporary_root / "project.rpp"
+            temporary_plan = self.validate_output_path(
+                str(temporary_output), overwrite=False
+            )
+            if not temporary_plan["ok"]:
+                return temporary_plan
+
+            prepared = await self.bridge_client.execute(
+                "prepare_render_snapshot",
+                args={
+                    "snapshot_path": str(snapshot_path),
+                    "render_output": temporary_plan["render_output"],
+                },
+            )
+            if not prepared.ok:
+                return self._error_result(prepared)
+
+            trace = list((prepared.result or {}).get("trace", []))
+            trace.append(
+                {
+                    "stage": "render_external_started",
+                    "elapsed_ms": 0,
+                    "detail": str(snapshot_path),
+                }
+            )
+            try:
+                completed = await asyncio.to_thread(
+                    subprocess.run,
+                    [str(executable), "-renderproject", str(snapshot_path)],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=self.render_timeout_seconds,
+                    env=os.environ.copy(),
+                )
+            except subprocess.TimeoutExpired:
+                return self._external_render_failure(
+                    "The isolated REAPER render exceeded the configured timeout.",
+                    trace,
+                )
+            except OSError as exc:
+                return self._external_render_failure(
+                    f"Could not start the isolated REAPER renderer: {exc}",
+                    trace,
+                )
+
+            trace.append(
+                {
+                    "stage": "render_external_returned",
+                    "elapsed_ms": 0,
+                    "detail": f"returncode={completed.returncode}",
+                }
+            )
+            if completed.returncode != 0:
+                detail = completed.stderr.strip() or completed.stdout.strip()
+                return self._external_render_failure(
+                    f"The isolated REAPER renderer failed: {detail or 'unknown error'}",
+                    trace,
+                )
+
+            size = temporary_output.stat().st_size if temporary_output.exists() else 0
+            if size <= 0:
+                return self._external_render_failure(
+                    "The isolated REAPER renderer returned without a WAV output.",
+                    trace,
+                )
+
+            try:
+                if final_plan["overwrite"]:
+                    os.replace(temporary_output, final_plan["output_path"])
+                else:
+                    os.rename(temporary_output, final_plan["output_path"])
+            except OSError as exc:
+                return self._external_render_failure(
+                    f"Could not promote the verified render output: {exc}", trace
+                )
+
+            trace.append(
+                {
+                    "stage": "transaction_verified",
+                    "elapsed_ms": 0,
+                    "detail": "snapshot settings restored and output promoted",
+                }
+            )
+            prepared_transaction = (prepared.result or {}).get("transaction", {})
+            result = RenderProjectResult(
+                primary_output_path=final_plan["output_path"],
+                output_files=[
+                    {
+                        "path": final_plan["output_path"],
+                        "size_bytes": size,
+                        "exists": True,
+                    }
+                ],
+                output_file_count=1,
+                render_stats="",
+                render_stats_summary="",
+                transaction={
+                    **prepared_transaction,
+                    "output_overwritten": bool(final_plan["overwrite"]),
+                    "trace": trace,
+                },
+            )
+            return {
+                "ok": True,
+                "render": result.model_dump(mode="json"),
+                "warnings": [],
+            }
 
     async def start_render_project(
         self,
@@ -362,6 +508,42 @@ class RenderService:
                     "Enable Render in background in REAPER, then set "
                     "REAPER_MCP_RENDER_BACKGROUND_CONFIRMED=true."
                 ),
+            ).model_dump(mode="json"),
+            "warnings": [],
+        }
+
+    def _resolve_reaper_executable(self) -> Path | None:
+        if self.reaper_executable is not None:
+            return self.reaper_executable if self.reaper_executable.is_file() else None
+        discovered = shutil.which("reaper")
+        return Path(discovered) if discovered else None
+
+    def _render_executable_not_found_result(self) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "error": ErrorResponse(
+                code=ErrorCode.RENDER_EXECUTABLE_NOT_FOUND,
+                message="The isolated REAPER renderer executable was not found.",
+                details={"configured_executable": str(self.reaper_executable or "")},
+                recoverable=True,
+                suggested_action=(
+                    "Set REAPER_MCP_REAPER_EXECUTABLE to the REAPER binary path."
+                ),
+            ).model_dump(mode="json"),
+            "warnings": [],
+        }
+
+    def _external_render_failure(
+        self, message: str, trace: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "error": ErrorResponse(
+                code=ErrorCode.RENDER_FAILED,
+                message=message,
+                details={"trace": trace},
+                recoverable=True,
+                suggested_action="Inspect the render trace and retry.",
             ).model_dump(mode="json"),
             "warnings": [],
         }
