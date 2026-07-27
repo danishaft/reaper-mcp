@@ -61,9 +61,12 @@ Approved core tools:
 
 Deferred tools:
 
-- Socket transport after the file bridge is stable.
-- Static type checking after the package skeleton exists.
-- Coverage reporting after the first useful test suite exists.
+- Socket transport only after measured file-bridge latency blocks a real
+  workflow.
+- Static type checking when it removes defects not covered by the current typed
+  schemas and Ruff checks.
+- Coverage reporting when the metric will drive a specific test-quality
+  decision.
 
 ## Architecture rules
 
@@ -73,9 +76,11 @@ the layer below it.
 Required flow:
 
 ```text
-MCP tool layer
+MCP, CLI, or REST adapter
+  -> profiled tool registry
+  -> thin tool layer
   -> service and workflow layer
-  -> safety and validation layer
+  -> models and operation-specific policies
   -> bridge client interface
   -> Lua bridge
   -> ReaScript API
@@ -85,68 +90,51 @@ Rules:
 
 - MCP tools stay thin.
 - Services contain workflow and business logic.
-- The safety layer validates every mutating operation.
+- Models and services validate inputs and filesystem policies before bridge
+  execution.
 - The bridge client owns request and response transport.
-- The Lua bridge owns direct ReaScript calls.
+- The Lua bridge owns direct ReaScript calls, identity resolution, mutation
+  preflight, and undo blocks.
 - Tool code must not write bridge files directly.
 - Workflow code must not import MCP decorators.
 - Lua bridge commands must use the shared command envelope.
+- CLI and REST must call the shared tool registry instead of creating separate
+  business paths.
 
 ## Package layout
 
 The package layout keeps transport, services, models, and bridge code separate.
 Create new modules only when they represent a real responsibility.
 
-Target structure:
+Current structure:
 
 ```text
 src/reaper_mcp/
-  __init__.py
-  server.py
-  config.py
-  errors.py
-  logging.py
-  models/
-    __init__.py
-    bridge.py
-    project.py
-    tools.py
-  tools/
-    __init__.py
-    health.py
-    tracks.py
-    transport.py
-    midi.py
-    fx.py
-    render.py
-  services/
-    __init__.py
-    project_service.py
-    track_service.py
-    midi_service.py
-    fx_service.py
-    render_service.py
-    workflow_service.py
-  bridge/
-    __init__.py
-    base.py
-    file_bridge.py
-    socket_bridge.py
-  safety/
-    __init__.py
-    validators.py
-    paths.py
-    undo.py
-  profiles/
-    __init__.py
-    registry.py
-    capabilities.py
+|-- server.py
+|-- cli.py
+|-- rest.py
+|-- install.py
+|-- config.py
+|-- errors.py
+|-- logging.py
+|-- profiles.py
+|-- models/
+|-- tools/
+|-- services/
+`-- bridge/
+    |-- base.py
+    `-- file_bridge.py
 lua/
-  reaper_mcp_bridge.lua
+`-- reaper_mcp_bridge.lua
 tests/
-  unit/
-  integration/
+|-- unit/
+`-- integration/
 ```
+
+Safety is a cross-cutting responsibility implemented in models, services,
+`CommandOptions`, the file bridge, and Lua command definitions. Do not create a
+standalone safety package unless it would own cohesive reusable behavior that
+those boundaries cannot express.
 
 ## Python coding rules
 
@@ -244,37 +232,30 @@ Rules:
   roots before filesystem or bridge calls.
 - Use defaults only when they are safe and unsurprising.
 - Return structured results instead of free-form strings.
-- Keep raw ReaScript payloads behind dedicated raw proxy models.
+- Do not expose unrestricted raw ReaScript payloads.
 
 ## Core data structures
 
 The server uses snapshots and command envelopes as its core data model. These
 structures give the AI client stable context without forcing many small calls.
 
-Required models:
+Representative models:
 
 - `ProjectSnapshot`.
 - `TrackSnapshot`.
-- `ItemSnapshot`.
+- `MediaItemSnapshot`.
 - `TakeSnapshot`.
 - `FxSnapshot`.
 - `MarkerSnapshot`.
 - `RegionSnapshot`.
 - `CommandEnvelope`.
 - `BridgeResponse`.
-- `ToolResult`.
 - `ErrorResponse`.
 
-Internal lookup maps:
-
-```python
-tracks_by_guid: dict[str, TrackSnapshot]
-items_by_guid: dict[str, ItemSnapshot]
-fx_by_track_guid: dict[str, list[FxSnapshot]]
-track_order: list[str]
-```
-
-The ordered lists preserve REAPER UI order. The maps provide stable lookup.
+List models preserve REAPER UI order. The Python process does not keep a
+project-state cache; read tools request current state from REAPER. Lua resolves
+GUIDs and guarded compound identities against the active project at execution
+time.
 
 ## Identity rules
 
@@ -314,30 +295,33 @@ Decisions:
 - Use one command envelope per logical tool call.
 - Batch related project mutations into one bridge command where practical.
 - Batch MIDI note insertion instead of sending one bridge request per note.
-- Use snapshot invalidation after every successful mutation.
-- Use snapshot diffing later to summarize workflow changes.
-- Use allowlists for raw ReaScript function access.
-- Use capability gates to load broad tool groups on demand.
+- Validate a complete batch before applying its first mutation.
+- Use fingerprints to reject stale MIDI and index-based identities.
+- Resolve filesystem paths before checking containment in approved roots.
+- Publish bridge JSON through a temporary file and atomic rename.
+- Poll native render output until its size is stable before completion.
+- Use set membership for profile and capability call gating.
 
 ## Bridge design rules
 
-The file bridge is the first transport because it is portable and easy to
-debug. It must still be written behind an interface so socket transport can
-arrive later without changing tools.
+The file bridge is the implemented transport because it is portable and easy
+to debug. It remains behind an interface so a measured transport problem can
+be solved without changing tools or services.
 
 Rules:
 
 - Put bridge behavior behind a `BridgeClient` interface.
-- Implement the file bridge as the first concrete client.
-- Keep socket bridge code out of the MVP unless the file bridge blocks real
-  workflows.
+- Keep `FileBridgeClient` as the concrete client until measurements justify a
+  replacement.
 - Use JSON for request and response files.
 - Include request IDs in every file.
 - Use one response file per request.
+- Publish request and response files with temporary writes and atomic renames.
 - Clean up completed request and response files.
 - Ignore stale files from prior sessions.
 - Time out bridge calls with a structured error.
 - Keep bridge directory configurable through settings.
+- Treat a timed-out mutation as outcome-uncertain if Lua may have started it.
 
 ## Command envelope rules
 
@@ -433,7 +417,7 @@ Rules:
 - Describe what the tool changes and what it never changes.
 - Keep one tool focused on one logical task.
 - Prefer workflow tools for common music tasks.
-- Keep raw ReaScript tools disabled by default.
+- Do not expose unrestricted raw ReaScript tools.
 - Return stable IDs, summaries, and warnings.
 - Return enough context for the client to continue without guessing.
 - Reject vague object references unless the resolver finds one clear match.
@@ -475,7 +459,8 @@ Rules:
 - Batch MIDI note creation and updates.
 - Batch workflow mutations into one bridge command where practical.
 - Avoid one bridge call per property when a snapshot can return the data.
-- Cache project snapshots and invalidate them after mutations.
+- Query current REAPER state instead of introducing a cache without a proven
+  invalidation design.
 - Avoid sending full MIDI notes, peaks, or project state unless requested.
 - Keep large payloads behind dedicated tools.
 - Use bridge duration logs to identify slow operations.
@@ -523,19 +508,16 @@ Manual tests:
 Logs must explain what happened without dumping large musical payloads by
 default.
 
-Required log fields:
+Bridge completion logs require these fields:
 
 - Request ID.
-- Tool name.
 - Bridge command name.
-- Active profile.
-- Capability state.
 - Target object IDs.
-- Undo label for mutating commands.
 - Duration.
 - Result status.
 - Error code.
 
+Render transactions also retain stage, elapsed time, and detail trace points.
 Debug mode can include larger payloads. Default logs must avoid full MIDI note
 lists, waveform peaks, and complete project dumps.
 
@@ -546,21 +528,23 @@ Configuration must be explicit, local, and easy to diagnose at startup.
 Required settings:
 
 - `REAPER_MCP_BRIDGE_DIR`.
-- `REAPER_MCP_PROFILE`.
+- `REAPER_MCP_TOOL_PROFILE`.
 - `REAPER_MCP_LOG_LEVEL`.
+- `REAPER_MCP_ALLOWED_MEDIA_SOURCE_ROOTS`.
+- `REAPER_MCP_ALLOWED_PROJECT_ROOTS`.
 - `REAPER_MCP_ALLOWED_RENDER_ROOTS`.
+- `REAPER_MCP_ALLOWED_TEMPLATE_ROOTS`.
+- `REAPER_MCP_ALLOWED_AUDIO_ROOTS`.
 - `REAPER_MCP_TRANSPORT`.
 - `REAPER_MCP_HTTP_HOST` and `REAPER_MCP_HTTP_PORT` when HTTP transport is used.
 - `REAPER_MCP_BRIDGE_TIMEOUT_SECONDS`.
+- `REAPER_MCP_RENDER_EXTERNAL_ENABLED`.
+- `REAPER_MCP_REAPER_EXECUTABLE` when isolated rendering cannot discover
+  REAPER.
 
-Startup diagnostics must report:
-
-- The active profile.
-- The bridge directory.
-- The selected transport.
-- The HTTP bind address and port when HTTP transport is selected.
-- Whether the bridge health check passes.
-- The configured allowed render roots.
+Configuration defaults must remain local and conservative. Approved-root lists
+default to empty, REST defaults to `127.0.0.1`, the stable tool profile defaults
+to `production`, and isolated rendering defaults to enabled.
 
 ## Anti-hallucination rules
 
@@ -575,8 +559,9 @@ Rules:
 - Return actual GUIDs after mutations.
 - Return warnings when a request partially succeeds.
 - Never claim a plugin was added unless REAPER confirms it.
-- Never claim a render finished unless REAPER returns a completed result.
-- Never expose raw ReaScript access without capability enablement.
+- Never claim a render finished unless the typed output and restoration
+  invariants pass.
+- Never expose unrestricted raw ReaScript access.
 
 ## Review checklist
 
@@ -596,12 +581,7 @@ Use this checklist before merging any implementation change.
 
 ## Next steps
 
-Use this document as the review checklist for remaining render work. Keep render
-paths root-guarded, result shapes stable, and REAPER bridge behavior verified
-before expanding render modes. Full-project rendering requires REAPER background
-rendering to be enabled and explicitly confirmed through
-`REAPER_MCP_RENDER_BACKGROUND_CONFIRMED=true`; a completed result must include
-stable output metadata plus render-setting and dirty-state restoration evidence.
-Keep the `production` profile free of experimental render tools until that
-evidence exists. Profile changes must filter both discovery and calls so a
-client cannot invoke a hidden tool from stale discovery state.
+Keep the `production` profile free of experimental native render tools until
+live evidence proves bridge liveness, output integrity, and state restoration.
+Measure file-bridge latency before adding another transport, and require live
+REAPER evidence when a change affects identity, undo, or native API behavior.
