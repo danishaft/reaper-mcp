@@ -12,6 +12,9 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/danishaft/reaper-mcp/actions/workflows/ci.yml">
+    <img src="https://github.com/danishaft/reaper-mcp/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI status">
+  </a>
   <a href="https://github.com/danishaft/reaper-mcp/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-yellow.svg?style=flat-square" alt="MIT License">
   </a>
@@ -29,6 +32,7 @@
   <a href="#interfaces">Interfaces</a> ·
   <a href="docs/reaper-mcp-product-architecture-spec.md">Architecture</a> ·
   <a href="docs/reaper-mcp-product-reality-audit.md">Acceptance audit</a>
+  · <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
 ## What it is
@@ -127,15 +131,16 @@ uv run reaper-mcp-cli health
 
 ## Platform support
 
-The Python package and installer contain platform path handling, but live DAW
-acceptance is narrower than source compatibility. Do not treat an unverified
-platform as production-ready until REAPER has been exercised there.
+The Python package and installer contain platform path handling. GitHub CI runs
+the unit, contract, lint, format, and package checks on all three platforms,
+but live DAW acceptance is narrower than source compatibility. Do not treat an
+unverified platform as production-ready until REAPER has been exercised there.
 
 | Platform | REAPER integration | Status |
 | --- | --- | --- |
-| **Linux** | REAPER 7.66, native Lua bridge, isolated render path | Live verified |
-| **macOS** | Installer path handling covered locally; live REAPER run pending | Not yet verified |
-| **Windows** | Installer path handling covered locally; live REAPER run pending | Not yet verified |
+| **Linux** | CI plus REAPER 7.66, native Lua bridge, isolated render path | Live verified |
+| **macOS** | CI and installer path handling; live REAPER run pending | CI tested, DAW unverified |
+| **Windows** | CI and installer path handling; live REAPER run pending | CI tested, DAW unverified |
 
 ## Available tool surface
 
@@ -402,6 +407,17 @@ tests/integration/    Opt-in live REAPER acceptance tests
 docs/                 Product, architecture, roadmap, and engineering truth
 demo/                 Local producer workflow fixtures
 ```
+
+## Releases and contribution
+
+Tagged releases publish the Python source distribution and wheel through the
+[release workflow](https://github.com/danishaft/reaper-mcp/actions/workflows/release.yml).
+The package still requires a local REAPER installation and a compatible Lua
+bridge; it is not a bundled REAPER application.
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) for development checks and live
+acceptance requirements. User-visible changes are tracked in
+[CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
