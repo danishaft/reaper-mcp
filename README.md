@@ -20,8 +20,8 @@
   </a>
   <img src="https://img.shields.io/badge/python-3.11%2B-blue.svg?style=flat-square" alt="Python 3.11 or newer">
   <img src="https://img.shields.io/badge/Linux-verified-25a162.svg?style=flat-square" alt="Linux verified">
-  <img src="https://img.shields.io/badge/macOS-not%20yet%20verified-lightgrey.svg?style=flat-square" alt="macOS not yet verified">
-  <img src="https://img.shields.io/badge/Windows-not%20yet%20verified-lightgrey.svg?style=flat-square" alt="Windows not yet verified">
+  <img src="https://img.shields.io/badge/macOS-CI%20tested-6f42c1.svg?style=flat-square" alt="macOS CI tested, REAPER unverified">
+  <img src="https://img.shields.io/badge/Windows-CI%20tested-6f42c1.svg?style=flat-square" alt="Windows CI tested, REAPER unverified">
   <img src="https://img.shields.io/badge/MCP-stdio%20%7C%20REST-6f42c1.svg?style=flat-square" alt="MCP stdio and REST">
   <img src="https://img.shields.io/badge/CLI-supported-6f42c1.svg?style=flat-square" alt="CLI supported">
   <img src="https://img.shields.io/badge/tools-146-6f42c1.svg?style=flat-square" alt="146 tools">
