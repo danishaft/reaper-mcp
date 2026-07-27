@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from reaper_mcp.config import Settings
@@ -9,7 +10,7 @@ def test_settings_load_allowed_media_source_roots_from_env(
 ) -> None:
     monkeypatch.setenv(
         "REAPER_MCP_ALLOWED_MEDIA_SOURCE_ROOTS",
-        f'["{tmp_path}"]',
+        json.dumps([str(tmp_path)]),
     )
 
     settings = Settings()
@@ -23,7 +24,7 @@ def test_settings_load_allowed_render_roots_from_env(
 ) -> None:
     monkeypatch.setenv(
         "REAPER_MCP_ALLOWED_RENDER_ROOTS",
-        f'["{tmp_path}"]',
+        json.dumps([str(tmp_path)]),
     )
 
     settings = Settings()
@@ -37,7 +38,7 @@ def test_settings_load_allowed_audio_roots_from_env(
 ) -> None:
     monkeypatch.setenv(
         "REAPER_MCP_ALLOWED_AUDIO_ROOTS",
-        f'["{tmp_path}"]',
+        json.dumps([str(tmp_path)]),
     )
 
     settings = Settings()
