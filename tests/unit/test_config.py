@@ -31,6 +31,20 @@ def test_settings_load_allowed_render_roots_from_env(
     assert settings.allowed_render_roots == [tmp_path]
 
 
+def test_settings_load_allowed_audio_roots_from_env(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv(
+        "REAPER_MCP_ALLOWED_AUDIO_ROOTS",
+        f'["{tmp_path}"]',
+    )
+
+    settings = Settings()
+
+    assert settings.allowed_audio_roots == [tmp_path]
+
+
 def test_settings_require_explicit_render_background_confirmation(monkeypatch) -> None:
     monkeypatch.setenv("REAPER_MCP_RENDER_BACKGROUND_CONFIRMED", "true")
 

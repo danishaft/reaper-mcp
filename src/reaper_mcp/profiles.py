@@ -40,6 +40,8 @@ CAPABILITY_TOOLS: dict[str, frozenset[str]] = {
             "set_track_arm",
             "set_track_volume",
             "set_track_pan",
+            "set_track_recording",
+            "set_track_folder_depth",
             "delete_track",
             "get_master_track",
             "set_master_volume",
@@ -70,6 +72,10 @@ CAPABILITY_TOOLS: dict[str, frozenset[str]] = {
             "add_midi_notes",
             "update_midi_note",
             "delete_midi_notes",
+            "list_midi_controller_events",
+            "add_midi_controller_events",
+            "update_midi_controller_event",
+            "delete_midi_controller_events",
             "transpose_midi_notes",
             "nudge_midi_notes",
             "quantize_midi_notes",
@@ -84,11 +90,22 @@ CAPABILITY_TOOLS: dict[str, frozenset[str]] = {
         {
             "list_available_fx",
             "list_track_fx",
+            "list_take_fx",
             "add_fx",
+            "add_take_fx",
             "remove_fx",
+            "remove_take_fx",
             "set_fx_enabled",
+            "set_take_fx_enabled",
             "get_fx_parameters",
             "set_fx_parameter",
+            "get_fx_preset",
+            "set_fx_preset",
+            "get_fx_preset_index",
+            "set_fx_preset_index",
+            "navigate_fx_presets",
+            "move_fx",
+            "copy_fx_chain",
         }
     ),
     "freeze": frozenset({"get_track_freeze_state", "freeze_track", "unfreeze_track"}),
@@ -116,7 +133,16 @@ CAPABILITY_TOOLS: dict[str, frozenset[str]] = {
         }
     ),
     "tempo": frozenset(
-        {"get_tempo", "set_tempo", "get_time_signature", "set_time_signature"}
+        {
+            "get_tempo",
+            "set_tempo",
+            "get_time_signature",
+            "set_time_signature",
+            "list_tempo_markers",
+            "create_tempo_marker",
+            "update_tempo_marker",
+            "delete_tempo_marker",
+        }
     ),
     "takes": frozenset(
         {
@@ -141,6 +167,14 @@ CAPABILITY_TOOLS: dict[str, frozenset[str]] = {
             "set_loop_enabled",
             "save_project",
             "save_project_as",
+            "undo",
+            "redo",
+            "get_grid_settings",
+            "set_grid_settings",
+            "get_metronome",
+            "set_metronome",
+            "get_playback_rate",
+            "set_playback_rate",
         }
     ),
     "routing": frozenset(
@@ -149,9 +183,20 @@ CAPABILITY_TOOLS: dict[str, frozenset[str]] = {
             "create_track_send",
             "set_track_send",
             "remove_track_send",
+            "setup_sidechain",
         }
     ),
-    "workflows": frozenset({"create_song_starter"}),
+    "workflows": frozenset({"create_song_starter", "create_midi_pattern"}),
+    "templates": frozenset(
+        {
+            "list_track_templates",
+            "save_track_template",
+            "apply_track_template",
+            "delete_track_template",
+        }
+    ),
+    "batch": frozenset({"batch_update_tracks"}),
+    "analysis": frozenset({"analyze_audio_file", "calculate_take_loudness"}),
     "rendering": frozenset(
         {
             "render_project",
@@ -195,6 +240,7 @@ PROFILE_CAPABILITIES: dict[ToolProfile, frozenset[str]] = {
             "takes",
             "navigation",
             "routing",
+            "analysis",
         }
     ),
     "full": frozenset(CAPABILITY_TOOLS),

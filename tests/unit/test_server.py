@@ -26,10 +26,10 @@ async def test_production_profile_exposes_every_stable_capability(
             expected.update(capability_tools)
 
     assert {tool.name for tool in tools} == expected
-    assert len(tools) == 104
+    assert len(tools) == 142
 
 
-async def test_full_profile_exposes_all_108_tools(tmp_path: Path) -> None:
+async def test_full_profile_exposes_all_tools(tmp_path: Path) -> None:
     server = create_server(Settings(bridge_dir=tmp_path, tool_profile="full"))
 
     tools = await server.list_tools()
@@ -38,7 +38,7 @@ async def test_full_profile_exposes_all_108_tools(tmp_path: Path) -> None:
         expected.update(capability_tools)
 
     assert {tool.name for tool in tools} == expected
-    assert len(tools) == 108
+    assert len(tools) == 146
 
 
 async def test_disabled_tool_cannot_be_called_from_cached_discovery(
@@ -64,7 +64,7 @@ async def test_profile_management_changes_discovery(tmp_path: Path) -> None:
     mixing = {tool.name for tool in await server.list_tools()}
 
     assert "add_midi_notes" not in initial
-    assert len(capabilities["capabilities"]) == 15
+    assert len(capabilities["capabilities"]) == 18
     assert status["active_profile"] == "minimal"
     assert "add_midi_notes" in enabled
     assert "add_midi_notes" not in disabled
