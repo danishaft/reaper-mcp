@@ -399,13 +399,34 @@ they are large or subject to separate distribution terms.
 
 ## Project layout
 
+The repository separates public interfaces, producer logic, typed contracts,
+REAPER execution, tests, and release documentation.
+
 ```text
-src/reaper_mcp/       Python server, services, models, and adapters
-lua/                  REAPER Lua bridge
-tests/unit/           Fast tests without REAPER
-tests/integration/    Opt-in live REAPER acceptance tests
-docs/                 Product, architecture, roadmap, and engineering truth
-demo/                 Local producer workflow fixtures
+.
+|-- src/reaper_mcp/
+|   |-- server.py             MCP composition root
+|   |-- cli.py                CLI adapter
+|   |-- rest.py               loopback REST adapter
+|   |-- profiles.py           profiles and capability gates
+|   |-- tools/                thin public tool handlers
+|   |-- services/             producer workflows and business logic
+|   |-- models/               typed request and result schemas
+|   `-- bridge/               Python bridge transport
+|-- lua/
+|   `-- reaper_mcp_bridge.lua REAPER-side command dispatcher
+|-- tests/
+|   |-- unit/                 tests without REAPER
+|   `-- integration/          opt-in live REAPER acceptance
+|-- docs/                     product, architecture, roadmap, and audit
+|-- demo/                     local producer workflow fixtures
+|-- assets/                   README and product media
+|-- .github/workflows/
+|   |-- ci.yml                Linux, macOS, and Windows CI
+|   `-- release.yml           tagged source and wheel releases
+|-- pyproject.toml            package metadata and tool configuration
+|-- uv.lock                  reproducible dependency lockfile
+`-- README.md                product overview and usage guide
 ```
 
 ## Releases and contribution
