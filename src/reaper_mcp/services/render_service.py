@@ -6,6 +6,7 @@ import asyncio
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -139,7 +140,7 @@ class RenderService:
             try:
                 completed = await asyncio.to_thread(
                     subprocess.run,
-                    [str(executable), "-renderproject", str(snapshot_path)],
+                    self._renderer_command(executable, snapshot_path),
                     check=False,
                     capture_output=True,
                     text=True,
@@ -517,6 +518,19 @@ class RenderService:
             return self.reaper_executable if self.reaper_executable.is_file() else None
         discovered = shutil.which("reaper")
         return Path(discovered) if discovered else None
+
+    @staticmethod
+    def _renderer_command(executable: Path, snapshot_path: Path) -> list[str]:
+        """Build a portable command for a native renderer or Python fixture."""
+
+        if executable.suffix.lower() == ".py":
+            return [
+                sys.executable,
+                str(executable),
+                "-renderproject",
+                str(snapshot_path),
+            ]
+        return [str(executable), "-renderproject", str(snapshot_path)]
 
     def _render_executable_not_found_result(self) -> dict[str, Any]:
         return {

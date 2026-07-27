@@ -187,16 +187,14 @@ async def test_render_service_renders_project_to_allowed_output(
 
 async def test_render_service_uses_isolated_reaper_process(tmp_path: Path) -> None:
     output_path = tmp_path / "isolated.wav"
-    executable = tmp_path / "fake-reaper"
+    executable = tmp_path / "fake_reaper.py"
     executable.write_text(
-        "#!/usr/bin/env python3\n"
         "import sys\n"
         "from pathlib import Path\n"
         "snapshot = Path(sys.argv[-1])\n"
         "(snapshot.parent / 'isolated.wav').write_bytes(b'RIFF')\n",
         encoding="utf-8",
     )
-    executable.chmod(0o755)
     bridge = FakeBridgeClient(
         BridgeResponse(
             id="request-1",
