@@ -10,3 +10,13 @@ dist/
 reaper-mcp-bridge/
 *.rpp-bak
 *.wav
+
+# Demo media is downloaded/generated locally and is not repository content.
+demo/audio/**/*.mp3
+demo/audio/**/*.zip
+demo/audio/**/*.acd
+demo/audio/**/extracted/
+demo/audio/**/instrumental/
+demo/audio/**/loops/
+demo/audio/**/vocals/
+demo/projects/Media/
