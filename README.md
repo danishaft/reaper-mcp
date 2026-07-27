@@ -211,21 +211,81 @@ complete configuration contract.
 
 ## Architecture
 
-```text
-MCP clients     CLI        Local REST apps
-     |           |              |
-     +-----------+--------------+
-                     |
-              Python adapters
-                     |
-          Profiles, services, safety
-                     |
-                File bridge
-                     |
-             Lua bridge in REAPER
-                     |
-                 ReaScript API
+REAPER MCP has one Python control plane and one execution boundary inside
+REAPER. MCP, CLI, and REST calls converge on the same tool registry, services,
+validation, safety rules, and bridge client. An interface never gets a separate
+implementation of a DAW operation.
+
+```mermaid
+flowchart LR
+    subgraph Clients["Client interfaces"]
+        MCP[MCP clients]
+        CLI[CLI]
+        REST[Loopback REST]
+    end
+
+    subgraph Python["Python control plane"]
+        Adapters["Protocol adapters"]
+        Registry["Tool registry<br/>profiles and capability gates"]
+        Tools["Thin tools<br/>request and result schemas"]
+        Services["Domain services and workflows<br/>producer operations"]
+        Safety["Validation and safety<br/>GUIDs, paths, dry-run, undo intent"]
+        Bridge["BridgeClient<br/>atomic JSON, timeouts, cleanup"]
+        Files[("Bridge directories<br/>requests / responses / jobs")]
+    end
+
+    subgraph Reaper["REAPER process"]
+        Lua["Deferred Lua bridge<br/>heartbeat and dispatcher"]
+        API["ReaScript API"]
+        Project[("Active REAPER project")]
+    end
+
+    MCP --> Adapters
+    CLI --> Adapters
+    REST --> Adapters
+    Adapters --> Registry --> Tools --> Services --> Safety --> Bridge
+    Bridge <-->|"JSON request / response files"| Files
+    Files <-->|"poll and write"| Lua
+    Lua --> API --> Project
+    Lua -.->|"job progress and completion"| Files
+
+    classDef boundary fill:#172033,stroke:#55d6ff,color:#ffffff
+    classDef safety fill:#33250f,stroke:#f2b84b,color:#ffffff
+    class Registry,Tools,Services,Bridge,Lua boundary
+    class Safety safety
 ```
+
+### What happens on a tool call
+
+1. The client calls a visible tool through MCP, the CLI, or loopback REST.
+2. The profile and capability gate decide whether that tool is exposed.
+3. The tool and service validate the request, resolve stable REAPER GUIDs, and
+   enforce path and mutation policies before touching REAPER.
+4. The bridge client writes an atomic JSON envelope with a request ID,
+   mutation classification, dry-run flag, and undo label.
+5. The Lua bridge polls the request, validates it again at the REAPER boundary,
+   resolves GUIDs, executes the ReaScript operation, and writes a structured
+   response. Mutating commands run inside one REAPER undo block.
+6. Python normalizes the response or stable error, then returns it unchanged in
+   meaning through the selected interface.
+
+Synchronous commands use `requests/` and `responses/`. Long-running render
+operations use `jobs/`, so the client can start a job, inspect its status, and
+read a completed result without confusing a timeout with a successful render.
+
+### Responsibility boundaries
+
+| Layer | Owns | Does not own |
+| --- | --- | --- |
+| **Adapters** | MCP, CLI, and HTTP protocol formatting | DAW behavior or safety decisions |
+| **Tools** | Public names, schemas, and thin dispatch | Direct filesystem or REAPER calls |
+| **Services** | Producer workflows, validation, and result shaping | Lua or ReaScript details |
+| **Bridge client** | Request files, polling, timeouts, and cleanup | Musical decisions or project mutation |
+| **Lua bridge** | REAPER execution, GUID resolution, undo blocks, and responses | Client-specific protocol behavior |
+
+This split makes the important guarantees visible: all interfaces share one
+behavior path, invalid or disallowed work is rejected before bridge execution,
+and every response identifies what actually happened.
 
 Read the [product and architecture specification](docs/reaper-mcp-product-architecture-spec.md)
 for the full component model and request flow. The [implementation roadmap](docs/reaper-mcp-implementation-roadmap.md)
