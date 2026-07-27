@@ -1,0 +1,447 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="2400" height="1600" viewBox="0 0 2400 1600" role="img" aria-labelledby="title description">
+  <title id="title">REAPER MCP system architecture overview</title>
+  <desc id="description">A complete high-level view of the clients, Python control plane, filesystem bridge, REAPER execution plane, rendering path, safety controls, and numbered request flow.</desc>
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#17202A" flood-opacity="0.10"/>
+    </filter>
+    <marker id="arrow-blue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M1 1L11 6L1 11Z" fill="#1677FF"/>
+    </marker>
+    <marker id="arrow-teal" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M1 1L11 6L1 11Z" fill="#087E8B"/>
+    </marker>
+    <marker id="arrow-amber" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M1 1L11 6L1 11Z" fill="#B66B00"/>
+    </marker>
+    <marker id="arrow-gray" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M1 1L11 6L1 11Z" fill="#5D6775"/>
+    </marker>
+
+    <symbol id="icon-user" viewBox="0 0 24 24">
+      <circle cx="12" cy="8" r="4"/>
+      <path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/>
+    </symbol>
+    <symbol id="icon-message" viewBox="0 0 24 24">
+      <path d="M4 5h16v11H9l-5 4V5Z"/>
+      <path d="M8 9h8M8 13h5"/>
+    </symbol>
+    <symbol id="icon-terminal" viewBox="0 0 24 24">
+      <rect x="3" y="4" width="18" height="16" rx="2"/>
+      <path d="m7 9 3 3-3 3M13 15h4"/>
+    </symbol>
+    <symbol id="icon-globe" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="9"/>
+      <path d="M3 12h18M12 3c3 3.4 3 14.6 0 18M12 3c-3 3.4-3 14.6 0 18"/>
+    </symbol>
+    <symbol id="icon-filter" viewBox="0 0 24 24">
+      <path d="M3 5h18l-7 8v6l-4 2v-8L3 5Z"/>
+    </symbol>
+    <symbol id="icon-tool" viewBox="0 0 24 24">
+      <path d="M14 6a5 5 0 0 0-6-3l3 3-3 3-3-3a5 5 0 0 0 6 6l7 7 3-3-7-7a5 5 0 0 0 0-3Z"/>
+    </symbol>
+    <symbol id="icon-layers" viewBox="0 0 24 24">
+      <path d="m12 3 9 5-9 5-9-5 9-5Z"/>
+      <path d="m3 12 9 5 9-5M3 16l9 5 9-5"/>
+    </symbol>
+    <symbol id="icon-shield" viewBox="0 0 24 24">
+      <path d="M12 2 20 5v6c0 5.2-3.3 9.1-8 11-4.7-1.9-8-5.8-8-11V5l8-3Z"/>
+      <path d="m8 12 2.5 2.5L16 9"/>
+    </symbol>
+    <symbol id="icon-file" viewBox="0 0 24 24">
+      <path d="M6 2h8l4 4v16H6V2Z"/>
+      <path d="M14 2v5h5M9 12h6M9 16h6"/>
+    </symbol>
+    <symbol id="icon-folder" viewBox="0 0 24 24">
+      <path d="M3 6h7l2 2h9v11H3V6Z"/>
+    </symbol>
+    <symbol id="icon-code" viewBox="0 0 24 24">
+      <path d="m8 8-4 4 4 4M16 8l4 4-4 4M14 4l-4 16"/>
+    </symbol>
+    <symbol id="icon-wave" viewBox="0 0 24 24">
+      <path d="M3 12h2l2-7 3 14 3-11 3 8 2-4h3"/>
+    </symbol>
+    <symbol id="icon-disc" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="9"/>
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M12 3v3M21 12h-3M12 21v-3M3 12h3"/>
+    </symbol>
+    <symbol id="icon-render" viewBox="0 0 24 24">
+      <rect x="3" y="4" width="18" height="16" rx="2"/>
+      <path d="m10 8 6 4-6 4V8ZM5 2v4M19 2v4"/>
+    </symbol>
+    <symbol id="icon-undo" viewBox="0 0 24 24">
+      <path d="m9 7-5 5 5 5"/>
+      <path d="M4 12h10a6 6 0 0 1 6 6"/>
+    </symbol>
+
+    <style>
+      text { font-family: Inter, "Segoe UI", Arial, sans-serif; fill: #17202A; letter-spacing: 0; }
+      .title { font-size: 54px; font-weight: 750; }
+      .subtitle { font-size: 22px; fill: #5D6775; }
+      .eyebrow { font-size: 17px; font-weight: 700; fill: #5D6775; }
+      .zone-title { font-size: 24px; font-weight: 750; }
+      .zone-meta { font-size: 16px; fill: #66717F; }
+      .card-title { font-size: 21px; font-weight: 720; }
+      .card-meta { font-size: 15px; fill: #5D6775; }
+      .card-copy { font-size: 16px; fill: #374151; }
+      .small { font-size: 14px; fill: #5D6775; }
+      .label { font-size: 15px; font-weight: 650; fill: #3F4A59; }
+      .flow-number { font-size: 15px; font-weight: 800; fill: #FFFFFF; text-anchor: middle; dominant-baseline: middle; }
+      .legend { font-size: 15px; fill: #374151; }
+      .icon { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+      .card { fill: #FFFFFF; stroke-width: 2; filter: url(#shadow); }
+      .flow { fill: none; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
+    </style>
+  </defs>
+
+  <rect width="2400" height="1600" fill="#F7F9FC"/>
+
+  <g id="header">
+    <rect x="70" y="54" width="104" height="104" rx="8" fill="#E5484D"/>
+    <use xlink:href="#icon-wave" x="92" y="76" width="60" height="60" class="icon" style="color:#FFFFFF;stroke-width:2.2"/>
+    <text x="202" y="98" class="title">REAPER MCP</text>
+    <text x="202" y="137" class="subtitle">System architecture overview - local AI-to-DAW control plane</text>
+
+    <g transform="translate(1850 64)">
+      <rect width="480" height="84" rx="8" fill="#FFFFFF" stroke="#D8DEE8" stroke-width="2"/>
+      <circle cx="34" cy="27" r="7" fill="#1F9D68"/>
+      <text x="54" y="33" class="eyebrow" style="fill:#166B49">IMPLEMENTED ARCHITECTURE</text>
+      <text x="34" y="62" class="small">Linux live acceptance | Python 3.11+ | REAPER 7.66</text>
+    </g>
+  </g>
+
+  <g id="zones">
+    <rect x="70" y="200" width="350" height="1000" rx="8" fill="#F0F6FF" stroke="#A8C7FA" stroke-width="2"/>
+    <rect x="450" y="200" width="800" height="1000" rx="8" fill="#F2FBF8" stroke="#95D5C0" stroke-width="2"/>
+    <rect x="1280" y="200" width="360" height="1000" rx="8" fill="#FFF8E8" stroke="#E9C46A" stroke-width="2"/>
+    <rect x="1670" y="200" width="660" height="1000" rx="8" fill="#FFF3F2" stroke="#F0AAA7" stroke-width="2"/>
+
+    <text x="98" y="242" class="zone-title" fill="#1456A0">1. PRODUCER AND CLIENTS</text>
+    <text x="98" y="270" class="zone-meta">Outside the product boundary</text>
+
+    <text x="478" y="242" class="zone-title" fill="#087E5B">2. PYTHON CONTROL PLANE</text>
+    <text x="478" y="270" class="zone-meta">One shared behavior path for every interface</text>
+
+    <text x="1308" y="242" class="zone-title" fill="#9A5C00">3. IPC BOUNDARY</text>
+    <text x="1308" y="270" class="zone-meta">Atomic local filesystem transport</text>
+
+    <text x="1698" y="242" class="zone-title" fill="#B63337">4. REAPER EXECUTION PLANE</text>
+    <text x="1698" y="270" class="zone-meta">Runs inside the interactive DAW process</text>
+  </g>
+
+  <g id="clients">
+    <g transform="translate(100 314)">
+      <rect width="290" height="132" rx="8" class="card" stroke="#6EA8FE"/>
+      <rect width="12" height="132" rx="6" fill="#1677FF"/>
+      <use xlink:href="#icon-user" x="28" y="28" width="45" height="45" class="icon" style="color:#1456A0"/>
+      <text x="92" y="51" class="card-title">Producer</text>
+      <text x="92" y="77" class="card-meta">Person</text>
+      <text x="28" y="108" class="card-copy">Requests production work</text>
+    </g>
+
+    <g transform="translate(100 482)">
+      <rect width="290" height="150" rx="8" class="card" stroke="#6EA8FE"/>
+      <use xlink:href="#icon-message" x="26" y="28" width="44" height="44" class="icon" style="color:#1677FF"/>
+      <text x="90" y="48" class="card-title">MCP host</text>
+      <text x="90" y="74" class="card-meta">Claude, Codex, or another client</text>
+      <text x="26" y="112" class="card-copy">MCP JSON-RPC</text>
+      <text x="26" y="134" class="small">stdio, long-lived process</text>
+    </g>
+
+    <g transform="translate(100 668)">
+      <rect width="290" height="150" rx="8" class="card" stroke="#6EA8FE"/>
+      <use xlink:href="#icon-terminal" x="26" y="28" width="44" height="44" class="icon" style="color:#1677FF"/>
+      <text x="90" y="48" class="card-title">CLI</text>
+      <text x="90" y="74" class="card-meta">Shell and local scripts</text>
+      <text x="26" y="112" class="card-copy">In-process invocation</text>
+      <text x="26" y="134" class="small">JSON output and exit status</text>
+    </g>
+
+    <g transform="translate(100 854)">
+      <rect width="290" height="150" rx="8" class="card" stroke="#6EA8FE"/>
+      <use xlink:href="#icon-globe" x="26" y="28" width="44" height="44" class="icon" style="color:#1677FF"/>
+      <text x="90" y="48" class="card-title">Loopback REST</text>
+      <text x="90" y="74" class="card-meta">Local automation adapter</text>
+      <text x="26" y="112" class="card-copy">JSON over HTTP</text>
+      <text x="26" y="134" class="small">127.0.0.1 only, no remote bind</text>
+    </g>
+
+    <path d="M245 446V482M245 632V668M245 818V854" stroke="#8FB8EC" stroke-width="3" stroke-dasharray="8 8"/>
+  </g>
+
+  <g id="python-control-plane">
+    <rect x="480" y="304" width="740" height="826" rx="8" fill="none" stroke="#14936F" stroke-width="3" stroke-dasharray="12 9"/>
+    <rect x="500" y="288" width="238" height="34" rx="8" fill="#DDF5EC"/>
+    <text x="520" y="311" class="label" style="fill:#087E5B">PROCESS TRUST BOUNDARY</text>
+
+    <g transform="translate(510 350)">
+      <rect width="680" height="128" rx="8" class="card" stroke="#67C3A5"/>
+      <use xlink:href="#icon-layers" x="24" y="30" width="44" height="44" class="icon" style="color:#087E5B"/>
+      <text x="88" y="47" class="card-title">Interface adapters</text>
+      <text x="88" y="74" class="card-meta">FastMCP stdio | CLI | loopback REST</text>
+      <rect x="24" y="92" width="190" height="24" rx="6" fill="#E7F7F1"/>
+      <text x="38" y="109" class="small" style="fill:#087E5B">protocol formatting only</text>
+      <rect x="228" y="92" width="185" height="24" rx="6" fill="#E7F7F1"/>
+      <text x="242" y="109" class="small" style="fill:#087E5B">shared registry instance</text>
+    </g>
+
+    <g transform="translate(510 520)">
+      <rect width="680" height="128" rx="8" class="card" stroke="#67C3A5"/>
+      <use xlink:href="#icon-filter" x="24" y="28" width="44" height="44" class="icon" style="color:#087E5B"/>
+      <text x="88" y="47" class="card-title">ProfiledFastMCP registry</text>
+      <text x="88" y="74" class="card-meta">Five profiles | 18 capability groups | discovery and call gate</text>
+      <text x="24" y="106" class="card-copy">Hidden tools remain uncallable through stale discovery.</text>
+    </g>
+
+    <g transform="translate(510 690)">
+      <rect width="320" height="156" rx="8" class="card" stroke="#67C3A5"/>
+      <use xlink:href="#icon-tool" x="24" y="26" width="42" height="42" class="icon" style="color:#087E5B"/>
+      <text x="84" y="45" class="card-title">Thin tools</text>
+      <text x="24" y="86" class="card-copy">Public names and schemas</text>
+      <text x="24" y="112" class="card-copy">Typed arguments</text>
+      <text x="24" y="138" class="card-copy">Single service delegation</text>
+    </g>
+
+    <g transform="translate(870 690)">
+      <rect width="320" height="156" rx="8" class="card" stroke="#67C3A5"/>
+      <use xlink:href="#icon-layers" x="24" y="26" width="42" height="42" class="icon" style="color:#087E5B"/>
+      <text x="84" y="45" class="card-title">Domain services</text>
+      <text x="24" y="86" class="card-copy">Producer workflows</text>
+      <text x="24" y="112" class="card-copy">Validation orchestration</text>
+      <text x="24" y="138" class="card-copy">Result and error mapping</text>
+    </g>
+
+    <g transform="translate(510 890)">
+      <rect width="440" height="190" rx="8" class="card" stroke="#E2B84B"/>
+      <use xlink:href="#icon-shield" x="24" y="27" width="44" height="44" class="icon" style="color:#9A5C00"/>
+      <text x="88" y="45" class="card-title">Typed models and safety policies</text>
+      <text x="24" y="88" class="card-copy">Pydantic v2 requests and results</text>
+      <text x="24" y="116" class="card-copy">Default-deny approved filesystem roots</text>
+      <text x="24" y="144" class="card-copy">Mutation class, dry-run and undo contract</text>
+      <text x="24" y="172" class="card-copy">Stable GUID identity and result invariants</text>
+    </g>
+
+    <g transform="translate(990 890)">
+      <rect width="200" height="190" rx="8" class="card" stroke="#67C3A5"/>
+      <use xlink:href="#icon-file" x="24" y="27" width="44" height="44" class="icon" style="color:#087E5B"/>
+      <text x="24" y="96" class="card-title">FileBridgeClient</text>
+      <text x="24" y="125" class="card-copy">Atomic publish</text>
+      <text x="24" y="151" class="card-copy">Poll and timeout</text>
+      <text x="24" y="177" class="card-copy">Cleanup and logs</text>
+    </g>
+
+    <path d="M850 478V520M850 648V675" class="flow" stroke="#087E8B" marker-end="url(#arrow-teal)"/>
+    <path d="M670 648V675" class="flow" stroke="#087E8B" marker-end="url(#arrow-teal)"/>
+    <path d="M830 768H855" class="flow" stroke="#087E8B" marker-end="url(#arrow-teal)"/>
+    <path d="M1030 846V875" class="flow" stroke="#087E8B" marker-end="url(#arrow-teal)"/>
+    <path d="M870 986H965" class="flow" stroke="#087E8B" marker-end="url(#arrow-teal)"/>
+  </g>
+
+  <g id="bridge-boundary">
+    <g transform="translate(1310 332)">
+      <rect width="300" height="478" rx="8" class="card" stroke="#E0AF3D"/>
+      <use xlink:href="#icon-folder" x="116" y="30" width="68" height="68" class="icon" style="color:#B66B00;stroke-width:1.6"/>
+      <text x="150" y="128" class="card-title" text-anchor="middle">Bridge directory</text>
+      <text x="150" y="154" class="card-meta" text-anchor="middle">Local JSON IPC</text>
+
+      <rect x="28" y="184" width="244" height="52" rx="6" fill="#FFF5D8" stroke="#E9C46A"/>
+      <text x="52" y="216" class="card-copy">requests/</text>
+      <rect x="28" y="250" width="244" height="52" rx="6" fill="#FFF5D8" stroke="#E9C46A"/>
+      <text x="52" y="282" class="card-copy">responses/</text>
+      <rect x="28" y="316" width="244" height="52" rx="6" fill="#FFF5D8" stroke="#E9C46A"/>
+      <text x="52" y="348" class="card-copy">jobs/</text>
+      <rect x="28" y="382" width="244" height="52" rx="6" fill="#FFF5D8" stroke="#E9C46A"/>
+      <text x="52" y="414" class="card-copy">heartbeat + traces</text>
+      <text x="150" y="459" class="small" text-anchor="middle">temp-write then rename</text>
+    </g>
+
+    <g transform="translate(1310 850)">
+      <rect width="300" height="228" rx="8" class="card" stroke="#E0AF3D"/>
+      <use xlink:href="#icon-file" x="24" y="26" width="42" height="42" class="icon" style="color:#B66B00"/>
+      <text x="84" y="45" class="card-title">Command envelope</text>
+      <text x="24" y="89" class="card-copy">request_id + command</text>
+      <text x="24" y="117" class="card-copy">typed payload</text>
+      <text x="24" y="145" class="card-copy">mutating + dry_run</text>
+      <text x="24" y="173" class="card-copy">undo_label</text>
+      <text x="24" y="201" class="card-copy">structured result or error</text>
+    </g>
+  </g>
+
+  <g id="reaper-plane">
+    <rect x="1700" y="304" width="600" height="826" rx="8" fill="none" stroke="#D94A4F" stroke-width="3" stroke-dasharray="12 9"/>
+    <rect x="1720" y="288" width="260" height="34" rx="8" fill="#FFE2E0"/>
+    <text x="1740" y="311" class="label" style="fill:#B63337">DAW PROCESS BOUNDARY</text>
+
+    <g transform="translate(1730 350)">
+      <rect width="540" height="150" rx="8" class="card" stroke="#EB817D"/>
+      <use xlink:href="#icon-code" x="24" y="29" width="46" height="46" class="icon" style="color:#D33F49"/>
+      <text x="90" y="48" class="card-title">Deferred Lua bridge</text>
+      <text x="90" y="75" class="card-meta">reaper_mcp_bridge.lua</text>
+      <text x="24" y="111" class="card-copy">Polls requests, validates envelopes and dispatches commands</text>
+      <text x="24" y="136" class="small">Serialized execution on REAPER's deferred loop</text>
+    </g>
+
+    <g transform="translate(1730 546)">
+      <rect width="250" height="230" rx="8" class="card" stroke="#EB817D"/>
+      <use xlink:href="#icon-shield" x="24" y="26" width="42" height="42" class="icon" style="color:#D33F49"/>
+      <text x="82" y="45" class="card-title">Execution guard</text>
+      <text x="24" y="88" class="card-copy">Resolve current GUIDs</text>
+      <text x="24" y="117" class="card-copy">Mutation preflight</text>
+      <text x="24" y="146" class="card-copy">State revalidation</text>
+      <text x="24" y="175" class="card-copy">Named undo block</text>
+      <text x="24" y="204" class="card-copy">Post-operation checks</text>
+    </g>
+
+    <g transform="translate(2020 546)">
+      <rect width="250" height="230" rx="8" class="card" stroke="#EB817D"/>
+      <use xlink:href="#icon-wave" x="24" y="26" width="42" height="42" class="icon" style="color:#D33F49"/>
+      <text x="82" y="45" class="card-title">ReaScript API</text>
+      <text x="24" y="88" class="card-copy">Project and tracks</text>
+      <text x="24" y="117" class="card-copy">Media, MIDI and takes</text>
+      <text x="24" y="146" class="card-copy">FX, routing, automation</text>
+      <text x="24" y="175" class="card-copy">Transport and tempo</text>
+      <text x="24" y="204" class="card-copy">Render and state APIs</text>
+    </g>
+
+    <g transform="translate(1730 822)">
+      <rect width="540" height="230" rx="8" class="card" stroke="#EB817D"/>
+      <use xlink:href="#icon-disc" x="24" y="28" width="52" height="52" class="icon" style="color:#D33F49"/>
+      <text x="96" y="48" class="card-title">Active REAPER project</text>
+      <text x="96" y="75" class="card-meta">Interactive producer-owned state</text>
+
+      <rect x="24" y="108" width="150" height="82" rx="6" fill="#FFF0EF" stroke="#F0AAA7"/>
+      <text x="99" y="139" class="label" text-anchor="middle">Tracks</text>
+      <text x="99" y="164" class="small" text-anchor="middle">GUID identity</text>
+
+      <rect x="195" y="108" width="150" height="82" rx="6" fill="#FFF0EF" stroke="#F0AAA7"/>
+      <text x="270" y="139" class="label" text-anchor="middle">Timeline</text>
+      <text x="270" y="164" class="small" text-anchor="middle">items + markers</text>
+
+      <rect x="366" y="108" width="150" height="82" rx="6" fill="#FFF0EF" stroke="#F0AAA7"/>
+      <text x="441" y="139" class="label" text-anchor="middle">Mix state</text>
+      <text x="441" y="164" class="small" text-anchor="middle">FX + routing</text>
+    </g>
+
+    <path d="M2000 500V531" class="flow" stroke="#D94A4F" marker-end="url(#arrow-gray)"/>
+    <path d="M1980 661H2005" class="flow" stroke="#D94A4F" marker-end="url(#arrow-gray)"/>
+    <path d="M2145 776V807" class="flow" stroke="#D94A4F" marker-end="url(#arrow-gray)"/>
+    <path d="M1855 776V807" class="flow" stroke="#D94A4F" marker-end="url(#arrow-gray)"/>
+  </g>
+
+  <g id="primary-flow">
+    <path d="M390 557H495" class="flow" stroke="#1677FF" marker-end="url(#arrow-blue)"/>
+    <circle cx="442" cy="557" r="17" fill="#1677FF"/>
+    <text x="442" y="557" class="flow-number">1</text>
+    <text x="442" y="532" class="label" text-anchor="middle">call</text>
+
+    <circle cx="850" cy="500" r="17" fill="#087E8B"/>
+    <text x="850" y="500" class="flow-number">2</text>
+    <text x="878" y="505" class="label">profile gate</text>
+
+    <circle cx="850" cy="670" r="17" fill="#087E8B"/>
+    <text x="850" y="670" class="flow-number">3</text>
+    <text x="878" y="675" class="label">delegate</text>
+
+    <circle cx="966" cy="986" r="17" fill="#B66B00"/>
+    <text x="966" y="986" class="flow-number">4</text>
+    <text x="910" y="1024" class="label">validate and publish</text>
+
+    <path d="M1190 985H1295" class="flow" stroke="#B66B00" marker-end="url(#arrow-amber)"/>
+    <circle cx="1242" cy="985" r="17" fill="#B66B00"/>
+    <text x="1242" y="985" class="flow-number">5</text>
+    <text x="1242" y="1022" class="label" text-anchor="middle">atomic JSON</text>
+
+    <path d="M1610 425H1715" class="flow" stroke="#B66B00" stroke-dasharray="10 9" marker-end="url(#arrow-amber)"/>
+    <circle cx="1662" cy="425" r="17" fill="#B66B00"/>
+    <text x="1662" y="425" class="flow-number">6</text>
+    <text x="1662" y="399" class="label" text-anchor="middle">poll</text>
+
+    <circle cx="2000" cy="524" r="17" fill="#D94A4F"/>
+    <text x="2000" y="524" class="flow-number">7</text>
+    <text x="2030" y="529" class="label">guarded execution</text>
+
+    <path d="M1715 748H1610" class="flow" stroke="#5D6775" stroke-dasharray="10 9" marker-end="url(#arrow-gray)"/>
+    <circle cx="1662" cy="748" r="17" fill="#5D6775"/>
+    <text x="1662" y="748" class="flow-number">8</text>
+    <text x="1662" y="785" class="label" text-anchor="middle">structured response</text>
+  </g>
+
+  <g id="render-and-storage">
+    <rect x="70" y="1230" width="2260" height="286" rx="8" fill="#FFFFFF" stroke="#D8DEE8" stroke-width="2"/>
+    <text x="100" y="1272" class="zone-title">5. APPROVED STORAGE AND ISOLATED RENDERING</text>
+    <text x="100" y="1299" class="zone-meta">Optional path for long-running render jobs; normal DAW commands stay on the primary flow above</text>
+
+    <g transform="translate(100 1334)">
+      <rect width="475" height="132" rx="8" fill="#F3F0FF" stroke="#B7A6E8" stroke-width="2"/>
+      <use xlink:href="#icon-folder" x="24" y="28" width="46" height="46" class="icon" style="color:#6952B8"/>
+      <text x="90" y="48" class="card-title">Approved local roots</text>
+      <text x="90" y="76" class="card-meta">Default deny</text>
+      <text x="24" y="108" class="card-copy">projects | media | templates | analysis | renders</text>
+    </g>
+
+    <g transform="translate(770 1334)">
+      <rect width="460" height="132" rx="8" fill="#F3F0FF" stroke="#B7A6E8" stroke-width="2"/>
+      <use xlink:href="#icon-file" x="24" y="28" width="46" height="46" class="icon" style="color:#6952B8"/>
+      <text x="90" y="48" class="card-title">Prepared project snapshot</text>
+      <text x="90" y="76" class="card-meta">Temporary, isolated and restorable</text>
+      <text x="24" y="108" class="card-copy">Render settings applied without mutating the live project</text>
+    </g>
+
+    <g transform="translate(1425 1334)">
+      <rect width="420" height="132" rx="8" fill="#F3F0FF" stroke="#B7A6E8" stroke-width="2"/>
+      <use xlink:href="#icon-render" x="24" y="28" width="46" height="46" class="icon" style="color:#6952B8"/>
+      <text x="90" y="48" class="card-title">Isolated REAPER process</text>
+      <text x="90" y="76" class="card-meta">reaper -renderproject</text>
+      <text x="24" y="108" class="card-copy">Short-lived renderer outside the interactive DAW</text>
+    </g>
+
+    <g transform="translate(2010 1334)">
+      <rect width="290" height="132" rx="8" fill="#EDF9F3" stroke="#80C9A5" stroke-width="2"/>
+      <use xlink:href="#icon-wave" x="24" y="28" width="46" height="46" class="icon" style="color:#1F9D68"/>
+      <text x="90" y="48" class="card-title">Verified WAV</text>
+      <text x="90" y="76" class="card-meta">Stable and non-empty</text>
+      <text x="24" y="108" class="card-copy">Result returned only after checks</text>
+    </g>
+
+    <path d="M575 1400H755" class="flow" stroke="#6952B8" stroke-dasharray="10 8" marker-end="url(#arrow-gray)"/>
+    <path d="M1230 1400H1410" class="flow" stroke="#6952B8" stroke-dasharray="10 8" marker-end="url(#arrow-gray)"/>
+    <path d="M1845 1400H1995" class="flow" stroke="#6952B8" stroke-dasharray="10 8" marker-end="url(#arrow-gray)"/>
+  </g>
+
+  <g id="safety-ribbon">
+    <rect x="450" y="1146" width="1880" height="54" rx="8" fill="#233044"/>
+    <use xlink:href="#icon-shield" x="474" y="1159" width="28" height="28" class="icon" style="color:#FFFFFF"/>
+    <text x="520" y="1180" class="label" style="fill:#FFFFFF">CROSS-CUTTING INVARIANTS</text>
+    <text x="790" y="1180" class="small" style="fill:#E6EBF2">typed contracts</text>
+    <circle cx="910" cy="1173" r="3" fill="#8EA0B8"/>
+    <text x="930" y="1180" class="small" style="fill:#E6EBF2">GUID-first identity</text>
+    <circle cx="1074" cy="1173" r="3" fill="#8EA0B8"/>
+    <text x="1094" y="1180" class="small" style="fill:#E6EBF2">preflight before mutation</text>
+    <circle cx="1290" cy="1173" r="3" fill="#8EA0B8"/>
+    <text x="1310" y="1180" class="small" style="fill:#E6EBF2">one named undo block</text>
+    <circle cx="1502" cy="1173" r="3" fill="#8EA0B8"/>
+    <text x="1522" y="1180" class="small" style="fill:#E6EBF2">approved roots</text>
+    <circle cx="1642" cy="1173" r="3" fill="#8EA0B8"/>
+    <text x="1662" y="1180" class="small" style="fill:#E6EBF2">structured errors</text>
+    <circle cx="1804" cy="1173" r="3" fill="#8EA0B8"/>
+    <text x="1824" y="1180" class="small" style="fill:#E6EBF2">truthful observed outcomes</text>
+  </g>
+
+  <g id="legend" transform="translate(70 1537)">
+    <text x="0" y="22" class="label">LEGEND</text>
+    <line x1="98" y1="17" x2="156" y2="17" stroke="#1677FF" stroke-width="4" marker-end="url(#arrow-blue)"/>
+    <text x="174" y="22" class="legend">synchronous request</text>
+    <line x1="360" y1="17" x2="418" y2="17" stroke="#5D6775" stroke-width="4" stroke-dasharray="9 8" marker-end="url(#arrow-gray)"/>
+    <text x="436" y="22" class="legend">polling or optional path</text>
+    <rect x="658" y="4" width="32" height="26" rx="5" fill="none" stroke="#D94A4F" stroke-width="3" stroke-dasharray="7 5"/>
+    <text x="704" y="22" class="legend">process boundary</text>
+    <rect x="874" y="4" width="32" height="26" rx="5" fill="#FFF5D8" stroke="#E9C46A"/>
+    <text x="920" y="22" class="legend">safety or IPC</text>
+    <rect x="1070" y="4" width="32" height="26" rx="5" fill="#FFF0EF" stroke="#F0AAA7"/>
+    <text x="1116" y="22" class="legend">REAPER-owned state</text>
+    <rect x="1302" y="4" width="32" height="26" rx="5" fill="#F3F0FF" stroke="#B7A6E8"/>
+    <text x="1348" y="22" class="legend">isolated render path</text>
+    <text x="1645" y="22" class="small">Primary source: implemented modules and live acceptance evidence</text>
+  </g>
+</svg>

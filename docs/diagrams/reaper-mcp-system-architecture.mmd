@@ -1,0 +1,82 @@
+flowchart LR
+    Producer["Producer<br/>Creates, edits, mixes, and renders"]
+
+    subgraph Clients["1. Producer and clients"]
+        Host["MCP host<br/>MCP JSON-RPC over stdio"]
+        CLI["CLI<br/>In-process call and JSON output"]
+        REST["Loopback REST<br/>JSON HTTP on 127.0.0.1"]
+    end
+
+    subgraph Python["2. Python control plane - process trust boundary"]
+        Adapters["Interface adapters<br/>FastMCP | CLI | REST"]
+        Registry["ProfiledFastMCP registry<br/>Profiles and capability gates"]
+        Tools["Thin tools<br/>Names, schemas, delegation"]
+        Services["Domain services<br/>Workflows and result mapping"]
+        Policies["Typed models and safety policies<br/>Pydantic v2 | approved roots | GUID identity"]
+        FileBridge["FileBridgeClient<br/>Atomic publish | poll | timeout | cleanup"]
+    end
+
+    subgraph IPC["3. IPC boundary - local filesystem"]
+        Requests[("requests/<br/>Atomic JSON commands")]
+        Responses[("responses/<br/>Structured results and errors")]
+        Jobs[("jobs/<br/>Render status and traces")]
+        Heartbeat[("heartbeat<br/>Bridge liveness")]
+    end
+
+    subgraph REAPER["4. REAPER execution plane - DAW process boundary"]
+        Lua["Deferred Lua bridge<br/>Poll | validate | dispatch"]
+        Guard["Execution guard<br/>GUID resolution | preflight | undo"]
+        API["ReaScript API<br/>Native project operations"]
+        Project[("Active REAPER project<br/>Tracks | timeline | mix state")]
+    end
+
+    subgraph Render["5. Approved storage and isolated rendering"]
+        Roots[("Approved local roots<br/>Projects | media | templates | renders")]
+        Snapshot["Prepared project snapshot<br/>Temporary and restorable"]
+        Renderer["Isolated REAPER process<br/>reaper -renderproject"]
+        WAV[("Verified WAV<br/>Stable and non-empty")]
+    end
+
+    Producer --> Host
+    Producer --> CLI
+    Producer --> REST
+
+    Host -->|"1. call"| Adapters
+    CLI -->|"1. call"| Adapters
+    REST -->|"1. call"| Adapters
+    Adapters -->|"2. profile gate"| Registry
+    Registry -->|"3. visible tool"| Tools
+    Tools -->|"3. delegate"| Services
+    Services -->|"4. validate"| Policies
+    Policies -->|"4. approved command"| FileBridge
+    FileBridge -->|"5. atomic JSON"| Requests
+    Requests -.->|"6. deferred poll"| Lua
+    Lua -->|"7. guarded execution"| Guard
+    Guard --> API
+    API --> Project
+    Lua -.->|"8. structured response"| Responses
+    Responses -.-> FileBridge
+    Lua -.-> Jobs
+    Lua -.-> Heartbeat
+
+    Services -.->|"optional render job"| Snapshot
+    Roots --> Snapshot
+    Snapshot -.-> Renderer
+    Renderer -.-> WAV
+    WAV -.->|"verified result"| Services
+
+    classDef client fill:#F0F6FF,stroke:#1677FF,color:#17202A,stroke-width:2px
+    classDef python fill:#F2FBF8,stroke:#14936F,color:#17202A,stroke-width:2px
+    classDef safety fill:#FFF8E8,stroke:#B66B00,color:#17202A,stroke-width:2px
+    classDef ipc fill:#FFF5D8,stroke:#B66B00,color:#17202A,stroke-width:2px
+    classDef reaper fill:#FFF3F2,stroke:#D94A4F,color:#17202A,stroke-width:2px
+    classDef render fill:#F3F0FF,stroke:#6952B8,color:#17202A,stroke-width:2px
+    classDef success fill:#EDF9F3,stroke:#1F9D68,color:#17202A,stroke-width:2px
+
+    class Producer,Host,CLI,REST client
+    class Adapters,Registry,Tools,Services,FileBridge python
+    class Policies safety
+    class Requests,Responses,Jobs,Heartbeat ipc
+    class Lua,Guard,API,Project reaper
+    class Roots,Snapshot,Renderer render
+    class WAV success
