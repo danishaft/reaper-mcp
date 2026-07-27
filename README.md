@@ -44,15 +44,15 @@ approved ReaScript commands.
 
 ## What producers can do
 
-| Workflow | Capabilities |
-| --- | --- |
-| **Build** | Create tracks, MIDI items, song starters, chord progressions, and arpeggios |
-| **Arrange** | Move and split media items, manage takes, markers, regions, tempo, and time signatures |
-| **Mix** | Control levels, pan, mute, solo, recording inputs, routing, sidechains, FX, presets, and automation |
-| **Edit MIDI** | Add, update, delete, transpose, nudge, quantize, humanize, scale-snap, and shape notes |
-| **Manage projects** | Save projects, templates, folders, grid, metronome, playback, freeze, and undo/redo |
-| **Analyze** | Inspect WAV files, calculate take loudness, and inspect project state |
-| **Render** | Render approved WAV output with path checks and completion verification |
+| Producer workflow | Representative tools | What it enables |
+| --- | --- | --- |
+| **Build** | `create_song_starter`, `create_track`, `create_midi_pattern` | Start a song with tracks, MIDI parts, and a region |
+| **Arrange** | `move_media_item`, `split_media_item`, `create_marker`, `create_region` | Shape sections and place material on the timeline |
+| **Edit MIDI** | `add_midi_notes`, `quantize_midi_notes`, `humanize_midi_notes`, `snap_midi_notes_to_scale` | Write, correct, and vary musical performances |
+| **Mix** | `set_track_volume`, `add_fx`, `set_fx_parameter`, `setup_sidechain` | Balance tracks and build guarded processing chains |
+| **Manage projects** | `save_project`, `apply_track_template`, `freeze_track`, `undo` | Save, template, freeze, and recover project changes |
+| **Analyze** | `get_project_snapshot`, `analyze_audio_file`, `calculate_take_loudness` | Inspect project structure and approved audio files |
+| **Render** | `render_project`, `render_project_start`, `render_project_result` | Produce approved WAV output with completion checks |
 
 The default `production` profile exposes 142 stable tools. The `full` profile
 exposes all 146 tools, including experimental render lifecycle operations.
@@ -67,6 +67,36 @@ Lua bridge. They are different ways to reach the same product.
 | **MCP** | Claude, Codex, Cursor, and other AI clients | `uv run reaper-mcp` |
 | **CLI** | Producers, shell scripts, automation, and CI | `uv run reaper-mcp-cli` |
 | **REST** | Local apps, integrations, and future video or web clients | `REAPER_MCP_TRANSPORT=http uv run reaper-mcp` |
+
+## Quick demo
+
+With REAPER open and the Lua bridge running, a producer can create and inspect a
+song starter through the same tools an AI client uses. The example below shows
+the interaction shape; returned GUIDs are then used for later guarded edits.
+
+```text
+Producer: Create an 8-bar A-minor song starter and show me what was created.
+
+1. create_song_starter
+   {"name":"A-minor demo","bars":8,"root_note":69,"mode":"minor"}
+   -> Creates Drums, Bass, Chords, and Lead parts plus one song region.
+      The response returns stable track, item, take, and region identities.
+
+2. get_project_snapshot
+   {}
+   -> Returns the current project, transport state, tracks, markers, and regions.
+
+3. list_available_fx
+   {}
+   -> Returns the FX installed in this REAPER profile.
+
+4. list_track_fx
+   {"track_guid":"<drums-track-guid>"}
+   -> Reads the drum track FX chain without changing the project.
+```
+
+Every write is validated before execution and appears as one named REAPER undo
+step. Read the returned identities instead of guessing from track positions.
 
 ## Quick start
 
@@ -94,6 +124,32 @@ Check the bridge before making changes:
 ```bash
 uv run reaper-mcp-cli health
 ```
+
+## Platform support
+
+The Python package and installer contain platform path handling, but live DAW
+acceptance is narrower than source compatibility. Do not treat an unverified
+platform as production-ready until REAPER has been exercised there.
+
+| Platform | REAPER integration | Status |
+| --- | --- | --- |
+| **Linux** | REAPER 7.66, native Lua bridge, isolated render path | Live verified |
+| **macOS** | Installer path handling covered locally; live REAPER run pending | Not yet verified |
+| **Windows** | Installer path handling covered locally; live REAPER run pending | Not yet verified |
+
+## Available tool surface
+
+The server registers 146 tools and exposes 142 stable tools in the default
+`production` profile. Use discovery instead of memorizing the complete list.
+
+```bash
+uv run reaper-mcp-cli tools --pretty
+uv run reaper-mcp-cli capabilities --pretty
+```
+
+The `minimal`, `midi`, and `mixing` profiles reduce the visible surface for
+focused sessions. The `full` profile also exposes experimental render lifecycle
+operations.
 
 ## MCP setup
 
@@ -292,13 +348,14 @@ for the full component model and request flow. The [implementation roadmap](docs
 tracks the release work. The [product reality audit](docs/reaper-mcp-product-reality-audit.md)
 separates implemented, unit-tested, and live-accepted behavior.
 
-## Verified status
+## Verification and limitations
 
-The current Linux verification covers the bridge, project and track operations,
-transport, media, MIDI, FX, routing, automation, takes, arrangement, tempo,
-templates, analysis, workflows, interfaces, and isolated project rendering.
+The current acceptance evidence covers the bridge, project and track
+operations, transport, media, MIDI, FX, routing, automation, takes,
+arrangement, tempo, templates, analysis, workflows, interfaces, and isolated
+project rendering on Linux with REAPER 7.66.
 
-Run the local checks:
+Run the local checks without REAPER:
 
 ```bash
 uv run pytest
@@ -306,9 +363,28 @@ uv run ruff check .
 uv run ruff format --check .
 ```
 
-The native REAPER render action lifecycle remains experimental because action
-`42230` can block the Lua event loop. The isolated external render path is the
-verified render path. See the audit before relying on experimental render jobs.
+Live acceptance is opt-in and requires an isolated REAPER instance with both
+the bridge and acceptance-probe Lua scripts running:
+
+```bash
+REAPER_MCP_LIVE_TEST=1 \
+REAPER_MCP_BRIDGE_DIR=/tmp/reaper-mcp-bridge \
+uv run pytest tests/integration
+```
+
+Known limitations are deliberate and documented:
+
+- macOS and Windows have no live REAPER acceptance evidence yet.
+- The native render lifecycle remains experimental because action `42230` can
+  block the Lua event loop. The isolated external render path is verified.
+- `set_fx_preset` remains unverified when the installed test FX exposes no
+  preset.
+- The Lua bridge must be running inside REAPER before a tool can execute.
+- Plugin UI automation, audio-rate control, and cloud collaboration are out
+  of scope.
+
+See the [product reality audit](docs/reaper-mcp-product-reality-audit.md) for
+the complete acceptance matrix and retained test evidence.
 
 ## Demo projects
 
