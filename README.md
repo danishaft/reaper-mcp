@@ -13,11 +13,15 @@
 
 <p align="center">
   <a href="https://github.com/danishaft/reaper-mcp/blob/main/LICENSE">
-    <img src="https://img.shields.io/badge/license-MIT-yellow.svg" alt="MIT License">
+    <img src="https://img.shields.io/badge/license-MIT-yellow.svg?style=flat-square" alt="MIT License">
   </a>
-  <img src="https://img.shields.io/badge/python-3.11%2B-blue.svg" alt="Python 3.11 or newer">
-  <img src="https://img.shields.io/badge/REAPER-Linux%20verified-25a162.svg" alt="Linux verified with REAPER">
-  <img src="https://img.shields.io/badge/tools-146-6f42c1.svg" alt="146 tools">
+  <img src="https://img.shields.io/badge/python-3.11%2B-blue.svg?style=flat-square" alt="Python 3.11 or newer">
+  <img src="https://img.shields.io/badge/Linux-verified-25a162.svg?style=flat-square" alt="Linux verified">
+  <img src="https://img.shields.io/badge/macOS-not%20yet%20verified-lightgrey.svg?style=flat-square" alt="macOS not yet verified">
+  <img src="https://img.shields.io/badge/Windows-not%20yet%20verified-lightgrey.svg?style=flat-square" alt="Windows not yet verified">
+  <img src="https://img.shields.io/badge/MCP-stdio%20%7C%20REST-6f42c1.svg?style=flat-square" alt="MCP stdio and REST">
+  <img src="https://img.shields.io/badge/CLI-supported-6f42c1.svg?style=flat-square" alt="CLI supported">
+  <img src="https://img.shields.io/badge/tools-146-6f42c1.svg?style=flat-square" alt="146 tools">
 </p>
 
 <p align="center">
