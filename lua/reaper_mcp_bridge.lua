@@ -610,7 +610,12 @@ COMMANDS.get_bridge_status = {
         "set_track_arm",
         "set_track_volume",
         "set_track_pan",
+        "set_track_recording",
+        "set_track_folder_depth",
         "delete_track",
+        "save_track_template",
+        "apply_track_template",
+        "batch_update_tracks",
         "list_track_envelopes",
         "ensure_track_envelope",
         "get_envelope_points",
@@ -626,17 +631,27 @@ COMMANDS.get_bridge_status = {
         "set_master_mute",
         "list_track_sends",
         "create_track_send",
+        "setup_sidechain",
         "set_track_send",
         "remove_track_send",
         "get_track_freeze_state",
         "freeze_track",
         "unfreeze_track",
         "create_song_starter",
+        "create_midi_pattern",
         "play",
         "stop",
         "stop_recording",
         "pause",
         "record",
+        "undo",
+        "redo",
+        "get_grid",
+        "set_grid",
+        "get_metronome",
+        "set_metronome",
+        "get_playback_rate",
+        "set_playback_rate",
         "list_available_fx",
         "list_track_fx",
         "add_fx",
@@ -644,6 +659,13 @@ COMMANDS.get_bridge_status = {
         "set_fx_enabled",
         "get_fx_parameters",
         "set_fx_parameter",
+        "get_fx_preset",
+        "set_fx_preset",
+        "get_fx_preset_index",
+        "set_fx_preset_index",
+        "navigate_fx_presets",
+        "move_fx",
+        "copy_fx_chain",
         "list_markers",
         "create_marker",
         "delete_marker",
@@ -654,7 +676,12 @@ COMMANDS.get_bridge_status = {
         "set_tempo",
         "get_time_signature",
         "set_time_signature",
+        "list_tempo_markers",
+        "create_tempo_marker",
+        "update_tempo_marker",
+        "delete_tempo_marker",
         "render_project",
+        "prepare_render_snapshot",
         "list_media_items",
         "create_midi_item",
         "insert_audio_item",
@@ -674,9 +701,14 @@ COMMANDS.get_bridge_status = {
         "set_take_property",
         "crop_to_active_take",
         "get_midi_notes",
+        "calculate_take_loudness",
         "add_midi_notes",
         "update_midi_note",
         "delete_midi_notes",
+        "get_midi_controller_events",
+        "add_midi_controller_events",
+        "update_midi_controller_event",
+        "delete_midi_controller_events",
         "transpose_midi_notes",
         "nudge_midi_notes",
         "quantize_midi_notes",
@@ -713,6 +745,9 @@ local function track_snapshot(track)
     mute = safe_number_call(reaper.GetMediaTrackInfo_Value, 0, track, "B_MUTE") ~= 0,
     solo = safe_number_call(reaper.GetMediaTrackInfo_Value, 0, track, "I_SOLO") ~= 0,
     armed = safe_number_call(reaper.GetMediaTrackInfo_Value, 0, track, "I_RECARM") ~= 0,
+    folder_depth = math.floor(safe_number_call(reaper.GetMediaTrackInfo_Value, 0, track, "I_FOLDERDEPTH")),
+    recording_input = math.floor(safe_number_call(reaper.GetMediaTrackInfo_Value, 0, track, "I_RECINPUT")),
+    input_monitoring = safe_number_call(reaper.GetMediaTrackInfo_Value, 0, track, "I_RECMON") ~= 0,
     selected = safe_bool_call(reaper.IsTrackSelected, false, track),
     media_item_count = safe_number_call(reaper.CountTrackMediaItems, 0, track),
   }
@@ -1166,6 +1201,64 @@ local function require_take_by_guid(project, requested_take_guid)
   return take, item, take_index
 end
 
+local function take_fx_snapshot(take, take_guid_value, fx_index)
+  local _, name = reaper.TakeFX_GetFXName(take, fx_index, "")
+  local guid = nil
+  if reaper.TakeFX_GetFXGUID then
+    guid = reaper.TakeFX_GetFXGUID(take, fx_index)
+    if guid == "" then
+      guid = nil
+    end
+  end
+  local normalized_name = (name and name ~= "" and name) or ("FX " .. tostring(fx_index + 1))
+  return {
+    identity = table.concat({ take_guid_value, tostring(fx_index), guid or normalized_name }, ":"),
+    take_guid = take_guid_value,
+    index = fx_index,
+    name = normalized_name,
+    enabled = reaper.TakeFX_GetEnabled(take, fx_index),
+    offline = reaper.TakeFX_GetOffline(take, fx_index),
+    guid = guid,
+  }
+end
+
+local function take_fx_list(take, take_guid_value)
+  local fx = {}
+  local fx_count = safe_number_call(reaper.TakeFX_GetCount, 0, take)
+  for fx_index = 0, fx_count - 1 do
+    fx[#fx + 1] = take_fx_snapshot(take, take_guid_value, fx_index)
+  end
+  return fx
+end
+
+local function require_take_fx_identity(project, identity)
+  if type(identity) ~= "table" then
+    error("invalid_fx_reference: take fx_identity must be an object")
+  end
+  if type(identity.take_guid) ~= "string" or identity.take_guid == "" then
+    error("invalid_fx_reference: take_guid must be a non-empty string")
+  end
+  if type(identity.index) ~= "number" or identity.index < 0 then
+    error("invalid_fx_reference: take FX index must be >= 0")
+  end
+  if type(identity.expected_name) ~= "string" or identity.expected_name == "" then
+    error("invalid_fx_reference: expected_name must be a non-empty string")
+  end
+  local take = require_take_by_guid(project, identity.take_guid)
+  local fx_count = safe_number_call(reaper.TakeFX_GetCount, 0, take)
+  if identity.index >= fx_count then
+    error("fx_not_found: take FX index was not found")
+  end
+  local fx = take_fx_snapshot(take, identity.take_guid, identity.index)
+  if fx.name ~= identity.expected_name then
+    error("invalid_fx_reference: take FX name did not match")
+  end
+  if identity.expected_guid ~= nil and fx.guid ~= identity.expected_guid then
+    error("invalid_fx_reference: take FX GUID did not match")
+  end
+  return take, fx
+end
+
 local function require_midi_take_by_guid(project, requested_take_guid)
   local take = require_take_by_guid(project, requested_take_guid)
   if not reaper.TakeIsMIDI(take) then
@@ -1442,6 +1535,205 @@ local function midi_notes(project, take)
     end
   end
   return notes
+end
+
+local MIDI_CONTROLLER = {
+  event_types = {
+    [176] = "cc",
+    [192] = "program_change",
+    [208] = "channel_pressure",
+    [224] = "pitch_bend",
+  },
+}
+
+function MIDI_CONTROLLER.event_fingerprint(
+  selected,
+  muted,
+  position_ppq,
+  chanmsg,
+  channel,
+  msg2,
+  msg3
+)
+  return table.concat({
+    tostring(selected and 1 or 0),
+    tostring(muted and 1 or 0),
+    tostring(math.floor(position_ppq + 0.5)),
+    tostring(chanmsg),
+    tostring(channel),
+    tostring(msg2),
+    tostring(msg3),
+  }, ":")
+end
+
+function MIDI_CONTROLLER.event_snapshot(project, take, index)
+  local ok, selected, muted, position_ppq, chanmsg, channel, msg2, msg3 =
+    reaper.MIDI_GetCC(take, index)
+  if not ok or not MIDI_CONTROLLER.event_types[chanmsg] then
+    return nil
+  end
+  local event_type = MIDI_CONTROLLER.event_types[chanmsg]
+  local value = msg3
+  local controller = nil
+  if event_type == "cc" then
+    controller = msg2
+  elseif event_type == "pitch_bend" then
+    value = msg2 + (msg3 * 128)
+  else
+    value = msg2
+  end
+  return {
+    index = index,
+    fingerprint = MIDI_CONTROLLER.event_fingerprint(
+      selected,
+      muted,
+      position_ppq,
+      chanmsg,
+      channel,
+      msg2,
+      msg3
+    ),
+    position_ppq = position_ppq,
+    position_qn = reaper.MIDI_GetProjQNFromPPQPos(take, position_ppq),
+    event_type = event_type,
+    controller = controller,
+    value = value,
+    channel = channel,
+    selected = selected,
+    muted = muted,
+  }
+end
+
+function MIDI_CONTROLLER.events(project, take)
+  local events = {}
+  local _, _, cc_count = reaper.MIDI_CountEvts(take)
+  for index = 0, (cc_count or 0) - 1 do
+    local event = MIDI_CONTROLLER.event_snapshot(project, take, index)
+    if event then
+      events[#events + 1] = event
+    end
+  end
+  return events
+end
+
+function MIDI_CONTROLLER.validate_event(event)
+  if type(event) ~= "table" or type(event.position) ~= "table" then
+    error("invalid_midi_controller_request: position must be a musical position")
+  end
+  validate_musical_position(event.position)
+  local event_type = event.event_type or "cc"
+  if not MIDI_CONTROLLER.event_types[176] then
+    error("invalid_midi_controller_request: controller event map is unavailable")
+  end
+  if event_type ~= "cc" and event_type ~= "pitch_bend"
+      and event_type ~= "channel_pressure" and event_type ~= "program_change" then
+    error("invalid_midi_controller_request: unsupported event_type")
+  end
+  if type(event.channel) ~= "number" or event.channel < 0 or event.channel > 15 then
+    error("invalid_midi_controller_request: channel must be between 0 and 15")
+  end
+  if type(event.value) ~= "number" or event.value < 0 or event.value > 16383 then
+    error("invalid_midi_controller_request: value must be between 0 and 16383")
+  end
+  if event_type == "cc" then
+    if type(event.controller) ~= "number" or event.controller < 0 or event.controller > 127 then
+      error("invalid_midi_controller_request: controller must be between 0 and 127")
+    end
+    if event.value > 127 then
+      error("invalid_midi_controller_request: cc value must be between 0 and 127")
+    end
+  elseif event_type ~= "pitch_bend" and event.value > 127 then
+    error("invalid_midi_controller_request: event value must be between 0 and 127")
+  elseif event.controller ~= nil then
+    error("invalid_midi_controller_request: controller is only valid for cc events")
+  end
+end
+
+function MIDI_CONTROLLER.event_spec(event)
+  local event_type = event.event_type or "cc"
+  if event_type == "cc" then
+    return 176, event.controller, event.value
+  elseif event_type == "pitch_bend" then
+    return 224, event.value % 128, math.floor(event.value / 128)
+  elseif event_type == "channel_pressure" then
+    return 208, event.value, 0
+  end
+  return 192, event.value, 0
+end
+
+function MIDI_CONTROLLER.event_key(event, position_ppq)
+  local chanmsg, msg2, msg3 = MIDI_CONTROLLER.event_spec(event)
+  return table.concat({
+    tostring(math.floor(position_ppq + 0.5)),
+    tostring(chanmsg),
+    tostring(event.channel or 0),
+    tostring(msg2),
+    tostring(msg3),
+  }, ":")
+end
+
+function MIDI_CONTROLLER.snapshot_key(event)
+  local chanmsg = ({
+    cc = 176,
+    pitch_bend = 224,
+    channel_pressure = 208,
+    program_change = 192,
+  })[event.event_type]
+  local msg2 = event.controller or event.value
+  local msg3 = 0
+  if event.event_type == "cc" then
+    msg3 = event.value
+  elseif event.event_type == "pitch_bend" then
+    msg2 = event.value % 128
+    msg3 = math.floor(event.value / 128)
+  end
+  return table.concat({
+    tostring(math.floor(event.position_ppq + 0.5)),
+    tostring(chanmsg),
+    tostring(event.channel),
+    tostring(msg2),
+    tostring(msg3),
+  }, ":")
+end
+
+function MIDI_CONTROLLER.require_distinct_insertions(project, take, requested_events)
+  local keys = {}
+  for _, event in ipairs(MIDI_CONTROLLER.events(project, take)) do
+    keys[MIDI_CONTROLLER.snapshot_key(event)] = true
+  end
+  for _, event in ipairs(requested_events) do
+    local position_qn = musical_position(project, event.position).start_qn
+    local position_ppq = reaper.MIDI_GetPPQPosFromProjQN(take, position_qn)
+    local key = MIDI_CONTROLLER.event_key(event, position_ppq)
+    if keys[key] then
+      error("invalid_midi_controller_request: duplicate controller event identity")
+    end
+    keys[key] = true
+  end
+end
+
+function MIDI_CONTROLLER.require_identity(take, identity)
+  if type(identity) ~= "table" or type(identity.index) ~= "number"
+      or type(identity.expected_fingerprint) ~= "string" then
+    error("invalid_midi_controller_request: invalid event identity")
+  end
+  local event = MIDI_CONTROLLER.event_snapshot(current_project(), take, identity.index)
+  if not event then
+    error("midi_controller_conflict: controller event was not found")
+  end
+  if event.fingerprint ~= identity.expected_fingerprint then
+    error("midi_controller_conflict: controller event fingerprint changed")
+  end
+  return event
+end
+
+function MIDI_CONTROLLER.result(project, take, take_guid)
+  local events = MIDI_CONTROLLER.events(project, take)
+  return {
+    take_guid = take_guid,
+    events = events,
+    event_count = #events,
+  }
 end
 
 local function midi_note_insertion_key(selected, muted, start_ppq, channel, pitch, velocity)
@@ -1953,6 +2245,145 @@ COMMANDS.set_track_pan = {
   end,
 }
 
+COMMANDS.set_track_recording = {
+  mutates_project = true,
+  preflight_handler = function(envelope)
+    local project = current_project()
+    require_track_by_guid(project, envelope.args.track_guid)
+    if type(envelope.args.recording_input) ~= "number"
+        or envelope.args.recording_input < -1 or envelope.args.recording_input > 256 then
+      error("invalid_track_request: recording_input must be between -1 and 256")
+    end
+    if type(envelope.args.input_monitoring) ~= "boolean" then
+      error("invalid_track_request: input_monitoring must be boolean")
+    end
+  end,
+  handler = function(envelope)
+    local project = current_project()
+    local track = require_track_by_guid(project, envelope.args.track_guid)
+    reaper.SetMediaTrackInfo_Value(track, "I_RECINPUT", envelope.args.recording_input)
+    reaper.SetMediaTrackInfo_Value(track, "I_RECMON", envelope.args.input_monitoring and 1 or 0)
+    return track_mutation_result(project, track)
+  end,
+}
+
+COMMANDS.set_track_folder_depth = {
+  mutates_project = true,
+  preflight_handler = function(envelope)
+    local project = current_project()
+    require_track_by_guid(project, envelope.args.track_guid)
+    if type(envelope.args.folder_depth) ~= "number"
+        or envelope.args.folder_depth < -1 or envelope.args.folder_depth > 1 then
+      error("invalid_track_request: folder_depth must be -1, 0, or 1")
+    end
+  end,
+  handler = function(envelope)
+    local project = current_project()
+    local track = require_track_by_guid(project, envelope.args.track_guid)
+    reaper.SetMediaTrackInfo_Value(track, "I_FOLDERDEPTH", envelope.args.folder_depth)
+    reaper.TrackList_AdjustWindows(false)
+    reaper.UpdateArrange()
+    return track_mutation_result(project, track)
+  end,
+}
+
+local function validate_batch_track_change(change)
+  if type(change) ~= "table" or type(change.track_guid) ~= "string" or change.track_guid == "" then
+    error("invalid_track_request: each batch change needs a track_guid")
+  end
+  local has_change = change.name ~= nil or change.color ~= nil or change.muted ~= nil
+    or change.soloed ~= nil or change.armed ~= nil or change.volume ~= nil or change.pan ~= nil
+  if not has_change then
+    error("invalid_track_request: each batch change must set a property")
+  end
+  if change.name ~= nil and (type(change.name) ~= "string" or change.name == "") then
+    error("invalid_track_request: track name must be non-empty")
+  end
+  if change.color ~= nil and (type(change.color) ~= "number" or change.color < 0) then
+    error("invalid_track_request: track color must be >= 0")
+  end
+  if change.volume ~= nil and (type(change.volume) ~= "number" or change.volume < 0 or change.volume > 4) then
+    error("invalid_track_request: track volume must be between 0 and 4")
+  end
+  if change.pan ~= nil and (type(change.pan) ~= "number" or change.pan < -1 or change.pan > 1) then
+    error("invalid_track_request: track pan must be between -1 and 1")
+  end
+  for _, field in ipairs({"muted", "soloed", "armed"}) do
+    if change[field] ~= nil and type(change[field]) ~= "boolean" then
+      error("invalid_track_request: batch track state must be boolean")
+    end
+  end
+end
+
+COMMANDS.batch_update_tracks = {
+  mutates_project = true,
+  preflight_handler = function(envelope)
+    local project = current_project()
+    if type(envelope.args.changes) ~= "table" or #envelope.args.changes == 0 then
+      error("invalid_track_request: changes must be a non-empty array")
+    end
+    if #envelope.args.changes > 64 then
+      error("invalid_track_request: changes cannot contain more than 64 tracks")
+    end
+    local seen = {}
+    for _, change in ipairs(envelope.args.changes) do
+      validate_batch_track_change(change)
+      if seen[change.track_guid] then
+        error("invalid_track_request: duplicate track GUID in batch")
+      end
+      seen[change.track_guid] = true
+      require_track_by_guid(project, change.track_guid)
+    end
+  end,
+  handler = function(envelope)
+    local project = current_project()
+    local previous = {}
+    for _, change in ipairs(envelope.args.changes) do
+      local track = require_track_by_guid(project, change.track_guid)
+      local _, previous_name = reaper.GetTrackName(track, "")
+      previous[track] = {
+        name = previous_name or "",
+        color = reaper.GetTrackColor(track),
+        mute = reaper.GetMediaTrackInfo_Value(track, "B_MUTE"),
+        solo = reaper.GetMediaTrackInfo_Value(track, "I_SOLO"),
+        armed = reaper.GetMediaTrackInfo_Value(track, "I_RECARM"),
+        volume = reaper.GetMediaTrackInfo_Value(track, "D_VOL"),
+        pan = reaper.GetMediaTrackInfo_Value(track, "D_PAN"),
+      }
+    end
+    local mutation_ok, result_or_error = pcall(function()
+      for _, change in ipairs(envelope.args.changes) do
+        local track = require_track_by_guid(project, change.track_guid)
+        if change.name ~= nil then reaper.GetSetMediaTrackInfo_String(track, "P_NAME", change.name, true) end
+        if change.color ~= nil then reaper.SetTrackColor(track, change.color) end
+        if change.muted ~= nil then reaper.SetMediaTrackInfo_Value(track, "B_MUTE", change.muted and 1 or 0) end
+        if change.soloed ~= nil then reaper.SetMediaTrackInfo_Value(track, "I_SOLO", change.soloed and 1 or 0) end
+        if change.armed ~= nil then reaper.SetMediaTrackInfo_Value(track, "I_RECARM", change.armed and 1 or 0) end
+        if change.volume ~= nil then reaper.SetMediaTrackInfo_Value(track, "D_VOL", change.volume) end
+        if change.pan ~= nil then reaper.SetMediaTrackInfo_Value(track, "D_PAN", change.pan) end
+      end
+      reaper.TrackList_AdjustWindows(false)
+      reaper.UpdateArrange()
+      local tracks = project_tracks(project)
+      return {tracks = tracks, track_count = #tracks, changes_applied = true}
+    end)
+    if not mutation_ok then
+      for track, state in pairs(previous) do
+        reaper.GetSetMediaTrackInfo_String(track, "P_NAME", state.name, true)
+        reaper.SetTrackColor(track, state.color)
+        reaper.SetMediaTrackInfo_Value(track, "B_MUTE", state.mute)
+        reaper.SetMediaTrackInfo_Value(track, "I_SOLO", state.solo)
+        reaper.SetMediaTrackInfo_Value(track, "I_RECARM", state.armed)
+        reaper.SetMediaTrackInfo_Value(track, "D_VOL", state.volume)
+        reaper.SetMediaTrackInfo_Value(track, "D_PAN", state.pan)
+      end
+      reaper.UpdateArrange()
+      error(result_or_error)
+    end
+    return result_or_error
+  end,
+}
+
 COMMANDS.delete_track = {
   mutates_project = true,
   preflight_handler = function(envelope)
@@ -1968,6 +2399,91 @@ COMMANDS.delete_track = {
     reaper.UpdateArrange()
     return {
       deleted_track_guid = args.track_guid,
+      track_count = safe_number_call(reaper.CountTracks, 0, project),
+      changes_applied = true,
+    }
+  end,
+}
+
+local function require_template_path(path)
+  if type(path) ~= "string" or path == "" then
+    error("template_path_not_allowed: template_path must be a non-empty string")
+  end
+  if not path:lower():match("%.rtracktemplate$") then
+    error("template_path_not_allowed: template path must use .RTrackTemplate")
+  end
+  return path
+end
+
+COMMANDS.save_track_template = {
+  mutates_project = false,
+  preflight_handler = function(envelope)
+    require_track_by_guid(current_project(), envelope.args.track_guid)
+    require_template_path(envelope.args.template_path)
+  end,
+  handler = function(envelope)
+    local project = current_project()
+    local track = require_track_by_guid(project, envelope.args.track_guid)
+    local path = require_template_path(envelope.args.template_path)
+    local ok, chunk = reaper.GetTrackStateChunk(track, "", 10485760, false)
+    if not ok or type(chunk) ~= "string" or chunk == "" then
+      error("template_path_not_allowed: REAPER could not read the track state")
+    end
+    local file = io.open(path, "wb")
+    if not file then
+      error("template_path_not_allowed: could not write the template path")
+    end
+    file:write(chunk)
+    file:close()
+    return {
+      template_path = path,
+      track_count = safe_number_call(reaper.CountTracks, 0, project),
+      changes_applied = false,
+    }
+  end,
+}
+
+COMMANDS.apply_track_template = {
+  mutates_project = true,
+  preflight_handler = function(envelope)
+    require_template_path(envelope.args.template_path)
+    if envelope.args.index ~= nil and (type(envelope.args.index) ~= "number" or envelope.args.index < 1) then
+      error("invalid_track_request: template index must be >= 1")
+    end
+    local file = io.open(envelope.args.template_path, "rb")
+    if not file then
+      error("template_path_not_allowed: template file does not exist")
+    end
+    file:close()
+  end,
+  handler = function(envelope)
+    local project = current_project()
+    local file = io.open(envelope.args.template_path, "rb")
+    if not file then
+      error("template_path_not_allowed: template file does not exist")
+    end
+    local chunk = file:read("*a")
+    file:close()
+    local track_count = safe_number_call(reaper.CountTracks, 0, project)
+    local visible_index = envelope.args.index or (track_count + 1)
+    local insert_index = math.floor(visible_index - 1)
+    if insert_index < 0 or insert_index > track_count then
+      error("invalid_track_request: template index is outside the track list")
+    end
+    reaper.InsertTrackAtIndex(insert_index, true)
+    local track = reaper.GetTrack(project, insert_index)
+    local generated_guid = track and reaper.GetTrackGUID(track) or ""
+    if not track or not reaper.SetTrackStateChunk(track, chunk, false) then
+      error("invalid_track_request: REAPER could not apply the track template")
+    end
+    if generated_guid ~= "" then
+      reaper.GetSetMediaTrackInfo_String(track, "GUID", generated_guid, true)
+    end
+    reaper.TrackList_AdjustWindows(false)
+    reaper.UpdateArrange()
+    return {
+      template_path = envelope.args.template_path,
+      track = track_snapshot(track),
       track_count = safe_number_call(reaper.CountTracks, 0, project),
       changes_applied = true,
     }
@@ -2073,6 +2589,42 @@ COMMANDS.create_track_send = {
         source_track,
         0
       ),
+      changes_applied = true,
+    }
+  end,
+}
+
+COMMANDS.setup_sidechain = {
+  mutates_project = true,
+  preflight_handler = function(envelope)
+    local project = current_project()
+    require_track_by_guid(project, envelope.args.source_track_guid)
+    require_track_by_guid(project, envelope.args.destination_track_guid)
+    if envelope.args.source_track_guid == envelope.args.destination_track_guid then
+      error("invalid_send_reference: source and destination tracks must differ")
+    end
+    if type(envelope.args.volume) ~= "number" or envelope.args.volume < 0 or envelope.args.volume > 4 then
+      error("invalid_send_reference: sidechain amount must be between 0 and 4")
+    end
+  end,
+  handler = function(envelope)
+    local project = current_project()
+    local source = require_track_by_guid(project, envelope.args.source_track_guid)
+    local destination = require_track_by_guid(project, envelope.args.destination_track_guid)
+    local send_index = reaper.CreateTrackSend(source, destination)
+    if type(send_index) ~= "number" or send_index < 0 then
+      error("invalid_send_reference: REAPER could not create the sidechain send")
+    end
+    reaper.SetTrackSendInfo_Value(source, 0, send_index, "D_VOL", envelope.args.volume)
+    reaper.SetTrackSendInfo_Value(source, 0, send_index, "I_SRCCHAN", 0)
+    reaper.SetTrackSendInfo_Value(source, 0, send_index, "I_DSTCHAN", 2)
+    reaper.UpdateArrange()
+    return {
+      source_track_guid = envelope.args.source_track_guid,
+      destination_track_guid = envelope.args.destination_track_guid,
+      send = track_send_snapshot(source, envelope.args.source_track_guid, send_index),
+      source_channels = "1/2",
+      destination_channels = "3/4",
       changes_applied = true,
     }
   end,
@@ -2298,6 +2850,171 @@ COMMANDS.record = {
   end,
 }
 
+local function register_project_control_commands()
+local function project_grid_snapshot(project)
+  local _, division, swing_mode, swing = reaper.GetSetProjectGrid(
+    project,
+    false,
+    0,
+    0,
+    0
+  )
+  return {
+    division = division,
+    swing = swing,
+    swing_mode = swing_mode,
+    snap_enabled = reaper.GetToggleCommandState(1157) == 1,
+  }
+end
+
+local function project_control_result(action, project)
+  return {
+    action = action,
+    changes_applied = true,
+    grid = project and project_grid_snapshot(project) or nil,
+  }
+end
+
+COMMANDS.undo = {
+  mutates_project = false,
+  handler = function()
+    local project = current_project()
+    reaper.Undo_DoUndo2(project)
+    return project_control_result("undo", project)
+  end,
+}
+
+COMMANDS.redo = {
+  mutates_project = false,
+  handler = function()
+    local project = current_project()
+    reaper.Undo_DoRedo2(project)
+    return project_control_result("redo", project)
+  end,
+}
+
+COMMANDS.get_grid = {
+  mutates_project = false,
+  handler = function()
+    return {
+      action = "get_grid",
+      changes_applied = false,
+      grid = project_grid_snapshot(current_project()),
+    }
+  end,
+}
+
+COMMANDS.set_grid = {
+  mutates_project = false,
+  preflight_handler = function(envelope)
+    local args = envelope.args
+    if type(args.division) ~= "number" or args.division <= 0 or args.division > 64 then
+      error("invalid_navigation_request: grid division must be between 0 and 64")
+    end
+    if type(args.swing) ~= "number" or args.swing < -1 or args.swing > 1 then
+      error("invalid_navigation_request: grid swing must be between -1 and 1")
+    end
+    if type(args.swing_mode) ~= "number" or args.swing_mode < 0 or args.swing_mode > 2 then
+      error("invalid_navigation_request: grid swing_mode must be between 0 and 2")
+    end
+    if type(args.snap_enabled) ~= "boolean" then
+      error("invalid_navigation_request: snap_enabled must be boolean")
+    end
+  end,
+  handler = function(envelope)
+    local project = current_project()
+    local args = envelope.args
+    reaper.GetSetProjectGrid(
+      project,
+      true,
+      args.division,
+      args.swing_mode,
+      args.swing
+    )
+    local snap_enabled = reaper.GetToggleCommandState(1157) == 1
+    if snap_enabled ~= args.snap_enabled then
+      reaper.Main_OnCommand(1157, 0)
+    end
+    return {
+      action = "set_grid",
+      changes_applied = true,
+      grid = project_grid_snapshot(project),
+    }
+  end,
+}
+
+COMMANDS.get_metronome = {
+  mutates_project = false,
+  handler = function()
+    return {
+      action = "get_metronome",
+      changes_applied = false,
+      metronome_enabled = reaper.GetToggleCommandState(40364) == 1,
+    }
+  end,
+}
+
+COMMANDS.set_metronome = {
+  mutates_project = false,
+  preflight_handler = function(envelope)
+    if type(envelope.args.enabled) ~= "boolean" then
+      error("invalid_navigation_request: enabled must be boolean")
+    end
+  end,
+  handler = function(envelope)
+    local enabled = reaper.GetToggleCommandState(40364) == 1
+    if enabled ~= envelope.args.enabled then
+      reaper.Main_OnCommand(40364, 0)
+    end
+    return {
+      action = "set_metronome",
+      changes_applied = true,
+      metronome_enabled = reaper.GetToggleCommandState(40364) == 1,
+    }
+  end,
+}
+
+local function project_playback_rate(project, set_value, value)
+  if set_value then
+    reaper.CSurf_OnPlayRateChange(value)
+  end
+  return reaper.Master_GetPlayRate(project)
+end
+
+COMMANDS.get_playback_rate = {
+  mutates_project = false,
+  handler = function()
+    local project = current_project()
+    return {
+      action = "get_playback_rate",
+      changes_applied = false,
+      playback_rate = project_playback_rate(project, false),
+    }
+  end,
+}
+
+COMMANDS.set_playback_rate = {
+  mutates_project = false,
+  preflight_handler = function(envelope)
+    if type(envelope.args.rate) ~= "number" or envelope.args.rate <= 0 or envelope.args.rate > 4 then
+      error("invalid_navigation_request: playback rate must be between 0 and 4")
+    end
+  end,
+  handler = function(envelope)
+    local project = current_project()
+    project_playback_rate(project, true, envelope.args.rate)
+    return {
+      action = "set_playback_rate",
+      changes_applied = true,
+      playback_rate = project_playback_rate(project, false),
+    }
+  end,
+}
+
+end
+
+register_project_control_commands()
+
 COMMANDS.list_available_fx = {
   mutates_project = false,
   handler = function()
@@ -2317,6 +3034,20 @@ COMMANDS.list_track_fx = {
     local fx = track_fx_list(track, envelope.args.track_guid)
     return {
       track_guid = envelope.args.track_guid,
+      fx = fx,
+      fx_count = #fx,
+    }
+  end,
+}
+
+COMMANDS.list_take_fx = {
+  mutates_project = false,
+  handler = function(envelope)
+    local project = current_project()
+    local take = require_take_by_guid(project, envelope.args.take_guid)
+    local fx = take_fx_list(take, envelope.args.take_guid)
+    return {
+      take_guid = envelope.args.take_guid,
       fx = fx,
       fx_count = #fx,
     }
@@ -2370,6 +3101,47 @@ COMMANDS.add_fx = {
   end,
 }
 
+COMMANDS.add_take_fx = {
+  mutates_project = true,
+  preflight_handler = function(envelope)
+    local project = current_project()
+    local take = require_take_by_guid(project, envelope.args.take_guid)
+    if type(envelope.args.fx_identifier) ~= "string" or envelope.args.fx_identifier == "" then
+      error("fx_not_found: fx_identifier must be a non-empty string")
+    end
+    local fx_count = safe_number_call(reaper.TakeFX_GetCount, 0, take)
+    if envelope.args.index ~= nil
+        and (type(envelope.args.index) ~= "number" or envelope.args.index < 0
+          or envelope.args.index > fx_count) then
+      error("invalid_fx_reference: take FX insert index was not found")
+    end
+  end,
+  handler = function(envelope)
+    local args = envelope.args
+    local project = current_project()
+    local take = require_take_by_guid(project, args.take_guid)
+    local fx_index = reaper.TakeFX_AddByName(take, args.fx_identifier, 1)
+    if fx_index == nil or fx_index < 0 then
+      error("fx_insert_failed: REAPER rejected take FX insertion")
+    end
+    if args.index ~= nil and math.floor(args.index) ~= fx_index then
+      reaper.TakeFX_CopyToTake(take, fx_index, take, math.floor(args.index), true)
+      fx_index = math.floor(args.index)
+    end
+    if args.enabled == false then
+      reaper.TakeFX_SetEnabled(take, fx_index, false)
+    end
+    local fx = take_fx_list(take, args.take_guid)
+    return {
+      take_guid = args.take_guid,
+      added_fx = take_fx_snapshot(take, args.take_guid, fx_index),
+      fx = fx,
+      fx_count = #fx,
+      changes_applied = true,
+    }
+  end,
+}
+
 COMMANDS.remove_fx = {
   mutates_project = true,
   preflight_handler = function(envelope)
@@ -2389,6 +3161,28 @@ COMMANDS.remove_fx = {
       removed_fx_identity = fx.identity,
       fx = fx_list,
       fx_count = #fx_list,
+      changes_applied = true,
+    }
+  end,
+}
+
+COMMANDS.remove_take_fx = {
+  mutates_project = true,
+  preflight_handler = function(envelope)
+    require_take_fx_identity(current_project(), envelope.args.fx_identity)
+  end,
+  handler = function(envelope)
+    local project = current_project()
+    local take, fx_identity = require_take_fx_identity(project, envelope.args.fx_identity)
+    if not reaper.TakeFX_Delete(take, fx_identity.index) then
+      error("fx_not_found: REAPER rejected take FX removal")
+    end
+    local fx = take_fx_list(take, envelope.args.fx_identity.take_guid)
+    return {
+      take_guid = envelope.args.fx_identity.take_guid,
+      removed_fx_identity = fx_identity.identity,
+      fx = fx,
+      fx_count = #fx,
       changes_applied = true,
     }
   end,
@@ -2414,6 +3208,33 @@ COMMANDS.set_fx_enabled = {
       updated_fx = updated_fx,
       fx = fx_list,
       fx_count = #fx_list,
+      changes_applied = true,
+    }
+  end,
+}
+
+COMMANDS.set_take_fx_enabled = {
+  mutates_project = true,
+  preflight_handler = function(envelope)
+    require_take_fx_identity(current_project(), envelope.args.fx_identity)
+    if type(envelope.args.enabled) ~= "boolean" then
+      error("invalid_fx_reference: enabled must be a boolean")
+    end
+  end,
+  handler = function(envelope)
+    local project = current_project()
+    local take, fx_identity = require_take_fx_identity(project, envelope.args.fx_identity)
+    reaper.TakeFX_SetEnabled(take, fx_identity.index, envelope.args.enabled)
+    local fx = take_fx_list(take, envelope.args.fx_identity.take_guid)
+    return {
+      take_guid = envelope.args.fx_identity.take_guid,
+      updated_fx = take_fx_snapshot(
+        take,
+        envelope.args.fx_identity.take_guid,
+        fx_identity.index
+      ),
+      fx = fx,
+      fx_count = #fx,
       changes_applied = true,
     }
   end,
@@ -2464,6 +3285,197 @@ COMMANDS.set_fx_parameter = {
       updated_parameter = updated_parameter,
       parameters = parameters,
       parameter_count = #parameters,
+      changes_applied = true,
+    }
+  end,
+}
+
+local function register_fx_workflow_commands()
+local function fx_preset_snapshot(track, identity)
+  local _, preset_name = reaper.TrackFX_GetPreset(track, identity.index, "")
+  return {
+    fx_identity = identity,
+    preset_name = preset_name or "",
+    changes_applied = false,
+  }
+end
+
+local function fx_preset_bank_snapshot(track, identity, changes_applied)
+  local preset_index, preset_count = reaper.TrackFX_GetPresetIndex(
+    track,
+    identity.index
+  )
+  local _, preset_name = reaper.TrackFX_GetPreset(track, identity.index, "")
+  return {
+    fx_identity = identity,
+    preset_index = math.floor(preset_index or -1),
+    preset_count = math.floor(preset_count or 0),
+    preset_name = preset_name or "",
+    changes_applied = changes_applied == true,
+  }
+end
+
+COMMANDS.get_fx_preset = {
+  mutates_project = false,
+  handler = function(envelope)
+    local project = current_project()
+    local track = require_fx_identity(project, envelope.args.fx_identity)
+    return fx_preset_snapshot(track, envelope.args.fx_identity)
+  end,
+}
+
+COMMANDS.set_fx_preset = {
+  mutates_project = true,
+  preflight_handler = function(envelope)
+    local project = current_project()
+    require_fx_identity(project, envelope.args.fx_identity)
+    if type(envelope.args.preset_name) ~= "string" or envelope.args.preset_name == "" then
+      error("invalid_fx_request: preset_name must be a non-empty string")
+    end
+  end,
+  handler = function(envelope)
+    local project = current_project()
+    local track = require_fx_identity(project, envelope.args.fx_identity)
+    local set_ok = reaper.TrackFX_SetPreset(
+      track,
+      envelope.args.fx_identity.index,
+      envelope.args.preset_name
+    )
+    if not set_ok then
+      error("invalid_fx_request: REAPER rejected FX preset")
+    end
+    local result = fx_preset_snapshot(track, envelope.args.fx_identity)
+    result.changes_applied = true
+    return result
+  end,
+}
+
+COMMANDS.get_fx_preset_index = {
+  mutates_project = false,
+  handler = function(envelope)
+    local project = current_project()
+    local track = require_fx_identity(project, envelope.args.fx_identity)
+    return fx_preset_bank_snapshot(track, envelope.args.fx_identity, false)
+  end,
+}
+
+COMMANDS.set_fx_preset_index = {
+  mutates_project = true,
+  preflight_handler = function(envelope)
+    local project = current_project()
+    require_fx_identity(project, envelope.args.fx_identity)
+    if type(envelope.args.preset_index) ~= "number"
+        or envelope.args.preset_index < -2 then
+      error("invalid_fx_request: preset_index must be >= -2")
+    end
+  end,
+  handler = function(envelope)
+    local project = current_project()
+    local track = require_fx_identity(project, envelope.args.fx_identity)
+    local set_ok = reaper.TrackFX_SetPresetByIndex(
+      track,
+      envelope.args.fx_identity.index,
+      math.floor(envelope.args.preset_index)
+    )
+    if not set_ok then
+      error("invalid_fx_request: REAPER rejected FX preset index")
+    end
+    return fx_preset_bank_snapshot(track, envelope.args.fx_identity, true)
+  end,
+}
+
+COMMANDS.navigate_fx_presets = {
+  mutates_project = true,
+  preflight_handler = function(envelope)
+    local project = current_project()
+    require_fx_identity(project, envelope.args.fx_identity)
+    if type(envelope.args.direction) ~= "number"
+        or envelope.args.direction == 0 then
+      error("invalid_fx_request: direction must not be zero")
+    end
+  end,
+  handler = function(envelope)
+    local project = current_project()
+    local track = require_fx_identity(project, envelope.args.fx_identity)
+    local moved = reaper.TrackFX_NavigatePresets(
+      track,
+      envelope.args.fx_identity.index,
+      math.floor(envelope.args.direction)
+    )
+    if not moved then
+      error("invalid_fx_request: FX preset navigation failed")
+    end
+    return fx_preset_bank_snapshot(track, envelope.args.fx_identity, true)
+  end,
+}
+
+COMMANDS.move_fx = {
+  mutates_project = true,
+  preflight_handler = function(envelope)
+    local project = current_project()
+    local track, fx = require_fx_identity(project, envelope.args.fx_identity)
+    local fx_count = safe_number_call(reaper.TrackFX_GetCount, 0, track)
+    if type(envelope.args.destination_index) ~= "number"
+        or envelope.args.destination_index < 0
+        or envelope.args.destination_index >= fx_count then
+      error("invalid_fx_reference: destination_index was not found")
+    end
+    if fx.index == envelope.args.destination_index then
+      error("invalid_fx_reference: destination_index is unchanged")
+    end
+  end,
+  handler = function(envelope)
+    local project = current_project()
+    local track, fx = require_fx_identity(project, envelope.args.fx_identity)
+    local destination_index = math.floor(envelope.args.destination_index)
+    reaper.TrackFX_CopyToTrack(track, fx.index, track, destination_index, true)
+    local fx_list = track_fx_list(track, envelope.args.fx_identity.track_guid)
+    local moved_fx = fx_list[math.min(destination_index + 1, #fx_list)]
+    return {
+      track_guid = envelope.args.fx_identity.track_guid,
+      moved_fx = moved_fx,
+      fx = fx_list,
+      fx_count = #fx_list,
+      changes_applied = true,
+    }
+  end,
+}
+
+COMMANDS.copy_fx_chain = {
+  mutates_project = true,
+  preflight_handler = function(envelope)
+    local project = current_project()
+    if envelope.args.source_track_guid == envelope.args.destination_track_guid then
+      error("invalid_fx_request: source and destination tracks must differ")
+    end
+    local source = require_track_by_guid(project, envelope.args.source_track_guid)
+    require_track_by_guid(project, envelope.args.destination_track_guid)
+    if safe_number_call(reaper.TrackFX_GetCount, 0, source) == 0 then
+      error("invalid_fx_request: source track has no FX")
+    end
+    if type(envelope.args.replace_destination) ~= "boolean" then
+      error("invalid_fx_request: replace_destination must be boolean")
+    end
+  end,
+  handler = function(envelope)
+    local project = current_project()
+    local source = require_track_by_guid(project, envelope.args.source_track_guid)
+    local destination = require_track_by_guid(project, envelope.args.destination_track_guid)
+    if envelope.args.replace_destination then
+      for index = safe_number_call(reaper.TrackFX_GetCount, 0, destination) - 1, 0, -1 do
+        reaper.TrackFX_Delete(destination, index)
+      end
+    end
+    local source_count = safe_number_call(reaper.TrackFX_GetCount, 0, source)
+    for index = 0, source_count - 1 do
+      reaper.TrackFX_CopyToTrack(source, index, destination, -1, false)
+    end
+    local fx_list = track_fx_list(destination, envelope.args.destination_track_guid)
+    return {
+      source_track_guid = envelope.args.source_track_guid,
+      track_guid = envelope.args.destination_track_guid,
+      fx = fx_list,
+      fx_count = #fx_list,
       changes_applied = true,
     }
   end,
@@ -2698,6 +3710,224 @@ COMMANDS.set_time_signature = {
     }
   end,
 }
+
+end
+
+register_fx_workflow_commands()
+
+local function register_tempo_map_commands()
+local function tempo_marker_fingerprint(
+  position_seconds,
+  bpm,
+  numerator,
+  denominator,
+  linear
+)
+  return table.concat({
+    tostring(math.floor(position_seconds * 1000000 + 0.5)),
+    tostring(math.floor(bpm * 1000 + 0.5)),
+    tostring(numerator),
+    tostring(denominator),
+    tostring(linear and 1 or 0),
+  }, ":")
+end
+
+local function tempo_marker_snapshot(project, index)
+  local ok, position_seconds, _, _, bpm, numerator, denominator, linear =
+    reaper.GetTempoTimeSigMarker(project, index)
+  if not ok then
+    return nil
+  end
+  numerator = numerator > 0 and numerator or 4
+  denominator = denominator > 0 and denominator or 4
+  return {
+    index = index,
+    fingerprint = tempo_marker_fingerprint(
+      position_seconds,
+      bpm,
+      numerator,
+      denominator,
+      linear
+    ),
+    position_seconds = position_seconds,
+    position_qn = reaper.TimeMap2_timeToQN(project, position_seconds),
+    bpm = bpm,
+    numerator = numerator,
+    denominator = denominator,
+    linear = linear,
+  }
+end
+
+local function tempo_markers(project)
+  local markers = {}
+  local count = safe_number_call(reaper.CountTempoTimeSigMarkers, 0, project)
+  for index = 0, count - 1 do
+    local marker = tempo_marker_snapshot(project, index)
+    if marker then
+      markers[#markers + 1] = marker
+    end
+  end
+  return markers
+end
+
+local function require_tempo_marker_identity(project, identity)
+  if type(identity) ~= "table" or type(identity.index) ~= "number"
+      or type(identity.expected_fingerprint) ~= "string" then
+    error("invalid_tempo_request: invalid tempo-marker identity")
+  end
+  local marker = tempo_marker_snapshot(project, identity.index)
+  if not marker then
+    error("tempo_marker_conflict: tempo marker was not found")
+  end
+  if marker.fingerprint ~= identity.expected_fingerprint then
+    error("tempo_marker_conflict: tempo marker fingerprint changed")
+  end
+  return marker
+end
+
+local function validate_tempo_marker_request(marker)
+  if type(marker) ~= "table" then
+    error("invalid_tempo_request: marker must be an object")
+  end
+  if type(marker.position_seconds) ~= "number" or marker.position_seconds < 0 then
+    error("invalid_tempo_request: position_seconds must be >= 0")
+  end
+  if type(marker.bpm) ~= "number" or marker.bpm < 20 or marker.bpm > 400 then
+    error("invalid_tempo_request: bpm must be between 20 and 400")
+  end
+  if type(marker.numerator) ~= "number" or marker.numerator < 1 or marker.numerator > 32 then
+    error("invalid_tempo_request: numerator must be between 1 and 32")
+  end
+  if type(marker.denominator) ~= "number" or not is_supported_time_signature_denominator(marker.denominator) then
+    error("invalid_tempo_request: denominator is not supported")
+  end
+end
+
+local function tempo_marker_result(project, marker)
+  local markers = tempo_markers(project)
+  return {
+    markers = markers,
+    marker_count = #markers,
+    marker = marker,
+    changes_applied = true,
+  }
+end
+
+COMMANDS.list_tempo_markers = {
+  mutates_project = false,
+  handler = function()
+    local project = current_project()
+    local markers = tempo_markers(project)
+    return { markers = markers, marker_count = #markers }
+  end,
+}
+
+COMMANDS.create_tempo_marker = {
+  mutates_project = true,
+  preflight_handler = function(envelope)
+    validate_tempo_marker_request(envelope.args)
+  end,
+  handler = function(envelope)
+    local project = current_project()
+    validate_tempo_marker_request(envelope.args)
+    local args = envelope.args
+    local before_markers = tempo_markers(project)
+    local before_fingerprints = {}
+    for _, current_marker in ipairs(before_markers) do
+      before_fingerprints[current_marker.fingerprint] = true
+    end
+    local inserted = reaper.SetTempoTimeSigMarker(
+      project,
+      -1,
+      args.position_seconds,
+      -1,
+      -1,
+      args.bpm,
+      args.numerator,
+      args.denominator,
+      args.linear or false
+    )
+    if not inserted then
+      error("invalid_tempo_request: REAPER rejected tempo-marker creation")
+    end
+    reaper.UpdateTimeline()
+    local marker = nil
+    for _, current_marker in ipairs(tempo_markers(project)) do
+      if not before_fingerprints[current_marker.fingerprint]
+          and math.abs(current_marker.bpm - args.bpm) < 0.001
+          and current_marker.numerator == args.numerator
+          and current_marker.denominator == args.denominator then
+        marker = current_marker
+        break
+      end
+    end
+    if not marker then
+      error("invalid_tempo_request: created tempo marker was not returned")
+    end
+    return tempo_marker_result(project, marker)
+  end,
+}
+
+COMMANDS.update_tempo_marker = {
+  mutates_project = true,
+  preflight_handler = function(envelope)
+    local project = current_project()
+    require_tempo_marker_identity(project, envelope.args.identity)
+    validate_tempo_marker_request(envelope.args.marker)
+  end,
+  handler = function(envelope)
+    local project = current_project()
+    require_tempo_marker_identity(project, envelope.args.identity)
+    validate_tempo_marker_request(envelope.args.marker)
+    local args = envelope.args.marker
+    local updated = reaper.SetTempoTimeSigMarker(
+      project,
+      envelope.args.identity.index,
+      args.position_seconds,
+      -1,
+      -1,
+      args.bpm,
+      args.numerator,
+      args.denominator,
+      args.linear or false
+    )
+    if not updated then
+      error("tempo_marker_conflict: REAPER rejected tempo-marker update")
+    end
+    reaper.UpdateTimeline()
+    local marker = tempo_marker_snapshot(project, envelope.args.identity.index)
+    if not marker then
+      error("tempo_marker_conflict: updated tempo marker was not returned")
+    end
+    return tempo_marker_result(project, marker)
+  end,
+}
+
+COMMANDS.delete_tempo_marker = {
+  mutates_project = true,
+  preflight_handler = function(envelope)
+    require_tempo_marker_identity(current_project(), envelope.args.identity)
+  end,
+  handler = function(envelope)
+    local project = current_project()
+    require_tempo_marker_identity(project, envelope.args.identity)
+    if not reaper.DeleteTempoTimeSigMarker(project, envelope.args.identity.index) then
+      error("tempo_marker_conflict: REAPER rejected tempo-marker deletion")
+    end
+    reaper.UpdateTimeline()
+    local markers = tempo_markers(project)
+    return {
+      markers = markers,
+      marker_count = #markers,
+      deleted_marker_index = envelope.args.identity.index,
+      changes_applied = true,
+    }
+  end,
+}
+
+end
+
+register_tempo_map_commands()
 
 local function file_size(path)
   local file = io.open(path, "rb")
@@ -3205,6 +4435,78 @@ COMMANDS.render_project = {
   end,
 }
 
+COMMANDS.prepare_render_snapshot = {
+  mutates_project = false,
+  handler = function(envelope)
+    local project = current_project()
+    local render_output = require_render_output(envelope.args)
+    local snapshot_path = envelope.args.snapshot_path
+    if type(snapshot_path) ~= "string" or snapshot_path == "" then
+      error("invalid_render_request: snapshot_path must be a non-empty string")
+    end
+    if file_exists(snapshot_path) then
+      error("render_snapshot_failed: snapshot path already exists")
+    end
+    local trace = {}
+    local started_at = bridge_clock()
+    local dirty_before = safe_number_call(reaper.IsProjectDirty, 0, project) ~= 0
+    local settings = snapshot_render_settings(project)
+    local function trace_snapshot(stage, detail)
+      trace[#trace + 1] = {
+        stage = stage,
+        elapsed_ms = math.floor((bridge_clock() - started_at) * 1000),
+        detail = detail or "",
+      }
+    end
+
+    trace_snapshot("snapshot_captured")
+    local ok, snapshot_error = xpcall(function()
+      apply_render_setting(project, "RENDER_FILE", render_output.output_directory)
+      apply_render_setting(project, "RENDER_PATTERN", render_pattern_from_filename(render_output.filename))
+      apply_render_setting(project, "RENDER_FORMAT", "evaw")
+      apply_render_setting(project, "RENDER_FORMAT2", "")
+      apply_render_setting(project, "RENDER_BOUNDSFLAG", 1)
+      apply_render_setting(project, "RENDER_SETTINGS", 0)
+      apply_render_setting(project, "RENDER_ADDTOPROJ", 0)
+      reaper.Main_SaveProjectEx(project, snapshot_path, 0)
+      if not file_exists(snapshot_path) then
+        error("render_snapshot_failed: REAPER did not write the snapshot")
+      end
+      trace_snapshot("snapshot_saved", snapshot_path)
+    end, function(err)
+      return tostring(err)
+    end)
+
+    local restore_ok, restore_error = pcall(function()
+      restore_render_settings(project, settings)
+    end)
+    if not restore_ok then
+      error("render_state_not_restored: " .. tostring(restore_error))
+    end
+    local dirty_after = safe_number_call(reaper.IsProjectDirty, 0, project) ~= 0
+    if dirty_before ~= dirty_after then
+      error("render_state_not_restored: project dirty state changed")
+    end
+    trace_snapshot("transaction_verified")
+    if not ok then
+      error(tostring(snapshot_error))
+    end
+    return {
+      status = "prepared",
+      snapshot_path = snapshot_path,
+      transaction = {
+        settings_restored = true,
+        dirty_state_before = dirty_before,
+        dirty_state_after = dirty_after,
+        dirty_state_preserved = dirty_before == dirty_after,
+        output_overwritten = false,
+        trace = trace,
+      },
+      trace = trace,
+    }
+  end,
+}
+
 local SONG_STARTER_PARTS = {
   { role = "drums", name = "Drums" },
   { role = "bass", name = "Bass" },
@@ -3495,6 +4797,128 @@ COMMANDS.create_song_starter = {
     reaper.UpdateTimeline()
     reaper.UpdateArrange()
     return result_or_error
+  end,
+}
+
+local function validate_midi_pattern_request(project, args)
+  require_track_by_guid(project, args.track_guid)
+  if args.pattern ~= "chord_progression" and args.pattern ~= "arpeggio" then
+    error("invalid_workflow_request: pattern must be chord_progression or arpeggio")
+  end
+  require_song_starter_integer(args.start_measure, "start_measure")
+  require_song_starter_integer(args.bars, "bars")
+  require_song_starter_integer(args.root_note, "root_note")
+  if args.start_measure < 1 or args.start_measure > 9999 then
+    error("invalid_workflow_request: start_measure must be between 1 and 9999")
+  end
+  if args.bars < 1 or args.bars > 64 then
+    error("invalid_workflow_request: bars must be between 1 and 64")
+  end
+  if args.root_note < 36 or args.root_note > 84 then
+    error("invalid_workflow_request: root_note must be between 36 and 84")
+  end
+  if args.mode ~= "major" and args.mode ~= "minor" then
+    error("invalid_workflow_request: mode must be major or minor")
+  end
+  if args.subdivision_beats ~= 0.25 and args.subdivision_beats ~= 0.5
+      and args.subdivision_beats ~= 1 and args.subdivision_beats ~= 2 then
+    error("invalid_workflow_request: subdivision_beats must be 0.25, 0.5, 1, or 2")
+  end
+  local numerator, denominator = reaper.TimeMap_GetTimeSigAtTime(project, 0)
+  if numerator ~= 4 or denominator ~= 4 then
+    error("unsupported_workflow_time_signature: MIDI patterns require 4/4")
+  end
+  local start_qn = (args.start_measure - 1) * 4
+  return {
+    start_qn = start_qn,
+    end_qn = start_qn + (args.bars * 4),
+    start_seconds = reaper.TimeMap2_QNToTime(project, start_qn),
+    end_seconds = reaper.TimeMap2_QNToTime(project, start_qn + (args.bars * 4)),
+  }
+end
+
+local function midi_pattern_notes(args, start_qn)
+  local progression = SONG_STARTER_PROGRESSIONS[args.mode]
+  local notes = {}
+  for bar = 0, args.bars - 1 do
+    local bar_start = start_qn + (bar * 4)
+    local chord = progression[(bar % 4) + 1]
+    local chord_root = args.root_note + chord.degree
+    if args.pattern == "chord_progression" then
+      for _, interval in ipairs(chord.intervals) do
+        append_song_starter_note(notes, bar_start, 3.8, chord_root + interval, 84, 0)
+      end
+    else
+      local steps = math.floor(4 / args.subdivision_beats)
+      for step = 0, steps - 1 do
+        local interval = chord.intervals[(step % #chord.intervals) + 1]
+        append_song_starter_note(
+          notes,
+          bar_start + (step * args.subdivision_beats),
+          math.max(0.1, args.subdivision_beats * 0.8),
+          chord_root + interval + 12,
+          step % 2 == 0 and 96 or 82,
+          0
+        )
+      end
+    end
+  end
+  return notes
+end
+
+COMMANDS.create_midi_pattern = {
+  mutates_project = true,
+  preflight_handler = function(envelope)
+    validate_midi_pattern_request(current_project(), envelope.args)
+  end,
+  handler = function(envelope)
+    local project = current_project()
+    local args = envelope.args
+    local resolved = validate_midi_pattern_request(project, args)
+    local track = require_track_by_guid(project, args.track_guid)
+    local item = reaper.CreateNewMIDIItemInProj(
+      track,
+      resolved.start_seconds,
+      resolved.end_seconds,
+      false
+    )
+    if not item then
+      error("workflow_creation_failed: REAPER did not create the MIDI pattern item")
+    end
+    local take = reaper.GetActiveTake(item)
+    if not take or not reaper.TakeIsMIDI(take) then
+      error("workflow_creation_failed: REAPER did not create a MIDI pattern take")
+    end
+    local notes = midi_pattern_notes(args, resolved.start_qn)
+    for index, note in ipairs(notes) do
+      local inserted = reaper.MIDI_InsertNote(
+        take,
+        false,
+        false,
+        reaper.MIDI_GetPPQPosFromProjQN(take, note.start_qn),
+        reaper.MIDI_GetPPQPosFromProjQN(take, note.end_qn),
+        note.channel,
+        note.pitch,
+        note.velocity,
+        true
+      )
+      if not inserted then
+        reaper.DeleteTrackMediaItem(track, item)
+        error("workflow_creation_failed: REAPER rejected MIDI pattern note " .. tostring(index))
+      end
+    end
+    reaper.MIDI_Sort(take)
+    reaper.UpdateItemInProject(item)
+    reaper.UpdateArrange()
+    return {
+      pattern = args.pattern,
+      track_guid = args.track_guid,
+      item = media_item_snapshot(project, item),
+      note_count = #notes,
+      start_measure = args.start_measure,
+      bars = args.bars,
+      changes_applied = true,
+    }
   end,
 }
 
@@ -3882,6 +5306,27 @@ COMMANDS.get_midi_notes = {
   end,
 }
 
+COMMANDS.calculate_take_loudness = {
+  mutates_project = false,
+  handler = function(envelope)
+    local project = current_project()
+    local take = require_take_by_guid(project, envelope.args.take_guid)
+    local source = reaper.GetMediaItemTake_Source(take)
+    if not source then
+      error("audio_loudness_failed: take has no media source")
+    end
+
+    local source_path = reaper.GetMediaSourceFileName(source)
+    return {
+      take_guid = envelope.args.take_guid,
+      calculation_status = -1,
+      source_path = source_path ~= "" and source_path or nil,
+      render_stats = "",
+      render_stats_summary = "",
+    }
+  end,
+}
+
 local function finalize_midi_take_mutation(project, take)
   reaper.MIDI_Sort(take)
   local item = reaper.GetMediaItemTake_Item(take)
@@ -4046,6 +5491,161 @@ COMMANDS.delete_midi_notes = {
       deleted_count = deleted_count,
       changes_applied = true,
     }
+  end,
+}
+
+COMMANDS.get_midi_controller_events = {
+  mutates_project = false,
+  handler = function(envelope)
+    local project = current_project()
+    local take = require_midi_take_by_guid(project, envelope.args.take_guid)
+    return MIDI_CONTROLLER.result(project, take, envelope.args.take_guid)
+  end,
+}
+
+COMMANDS.add_midi_controller_events = {
+  mutates_project = true,
+  preflight_handler = function(envelope)
+    local project = current_project()
+    local take = require_midi_take_by_guid(project, envelope.args.take_guid)
+    if type(envelope.args.events) ~= "table" or #envelope.args.events == 0 then
+      error("invalid_midi_controller_request: events must be a non-empty array")
+    end
+    for _, event in ipairs(envelope.args.events) do
+      MIDI_CONTROLLER.validate_event(event)
+    end
+    MIDI_CONTROLLER.require_distinct_insertions(project, take, envelope.args.events)
+  end,
+  handler = function(envelope)
+    local project = current_project()
+    local take = require_midi_take_by_guid(project, envelope.args.take_guid)
+    MIDI_CONTROLLER.require_distinct_insertions(project, take, envelope.args.events)
+    local snapshot_ok, before_events = reaper.MIDI_GetAllEvts(take, "")
+    if not snapshot_ok then
+      error("midi_controller_insert_failed: REAPER could not snapshot the MIDI take")
+    end
+    local mutation_ok, result_or_error = pcall(function()
+      for _, event in ipairs(envelope.args.events) do
+        local position_qn = musical_position(project, event.position).start_qn
+        local position_ppq = reaper.MIDI_GetPPQPosFromProjQN(take, position_qn)
+        local chanmsg, msg2, msg3 = MIDI_CONTROLLER.event_spec(event)
+        local inserted = reaper.MIDI_InsertCC(
+          take,
+          event.selected or false,
+          event.muted or false,
+          position_ppq,
+          chanmsg,
+          event.channel or 0,
+          msg2,
+          msg3
+        )
+        if not inserted then
+          error("midi_controller_insert_failed: REAPER rejected controller event")
+        end
+      end
+      finalize_midi_take_mutation(project, take)
+      local result = MIDI_CONTROLLER.result(project, take, envelope.args.take_guid)
+      result.inserted_count = #envelope.args.events
+      result.inserted_events = {}
+      for _, requested in ipairs(envelope.args.events) do
+        local position_qn = musical_position(project, requested.position).start_qn
+        local position_ppq = reaper.MIDI_GetPPQPosFromProjQN(take, position_qn)
+        local requested_key = MIDI_CONTROLLER.event_key(requested, position_ppq)
+        for _, current_event in ipairs(result.events) do
+          if MIDI_CONTROLLER.snapshot_key(current_event) == requested_key then
+            result.inserted_events[#result.inserted_events + 1] = current_event
+            break
+          end
+        end
+      end
+      result.changes_applied = true
+      return result
+    end)
+    if not mutation_ok then
+      reaper.MIDI_SetAllEvts(take, before_events)
+      finalize_midi_take_mutation(project, take)
+      error(result_or_error)
+    end
+    return result_or_error
+  end,
+}
+
+COMMANDS.update_midi_controller_event = {
+  mutates_project = true,
+  preflight_handler = function(envelope)
+    local project = current_project()
+    local take = require_midi_take_by_guid(project, envelope.args.take_guid)
+    MIDI_CONTROLLER.require_identity(take, envelope.args.identity)
+    MIDI_CONTROLLER.validate_event(envelope.args.event)
+  end,
+  handler = function(envelope)
+    local project = current_project()
+    local take = require_midi_take_by_guid(project, envelope.args.take_guid)
+    MIDI_CONTROLLER.require_identity(take, envelope.args.identity)
+    local event = envelope.args.event
+    local position_qn = musical_position(project, event.position).start_qn
+    local position_ppq = reaper.MIDI_GetPPQPosFromProjQN(take, position_qn)
+    local chanmsg, msg2, msg3 = MIDI_CONTROLLER.event_spec(event)
+    local updated = reaper.MIDI_SetCC(
+      take,
+      envelope.args.identity.index,
+      event.selected or false,
+      event.muted or false,
+      position_ppq,
+      chanmsg,
+      event.channel or 0,
+      msg2,
+      msg3,
+      true
+    )
+    if not updated then
+      error("midi_controller_conflict: REAPER rejected controller update")
+    end
+    finalize_midi_take_mutation(project, take)
+    local result = MIDI_CONTROLLER.result(project, take, envelope.args.take_guid)
+    local updated_event = MIDI_CONTROLLER.event_snapshot(project, take, envelope.args.identity.index)
+    if not updated_event then
+      error("midi_controller_conflict: updated controller event was not returned")
+    end
+    result.updated_event = updated_event
+    result.changes_applied = true
+    return result
+  end,
+}
+
+COMMANDS.delete_midi_controller_events = {
+  mutates_project = true,
+  preflight_handler = function(envelope)
+    local project = current_project()
+    local take = require_midi_take_by_guid(project, envelope.args.take_guid)
+    if type(envelope.args.events) ~= "table" or #envelope.args.events == 0 then
+      error("invalid_midi_controller_request: events must be a non-empty array")
+    end
+    for _, identity in ipairs(envelope.args.events) do
+      MIDI_CONTROLLER.require_identity(take, identity)
+    end
+  end,
+  handler = function(envelope)
+    local project = current_project()
+    local take = require_midi_take_by_guid(project, envelope.args.take_guid)
+    for _, identity in ipairs(envelope.args.events) do
+      MIDI_CONTROLLER.require_identity(take, identity)
+    end
+    table.sort(envelope.args.events, function(left, right)
+      return left.index > right.index
+    end)
+    local deleted_count = 0
+    for _, identity in ipairs(envelope.args.events) do
+      if not reaper.MIDI_DeleteCC(take, identity.index) then
+        error("midi_controller_conflict: REAPER rejected controller delete")
+      end
+      deleted_count = deleted_count + 1
+    end
+    finalize_midi_take_mutation(project, take)
+    local result = MIDI_CONTROLLER.result(project, take, envelope.args.take_guid)
+    result.deleted_count = deleted_count
+    result.changes_applied = true
+    return result
   end,
 }
 
@@ -5670,6 +7270,16 @@ local function execute_read_command(request_id, command_definition, envelope)
       "Check file permissions or choose a different output path."
     )
   end
+  if error_text:find("render_snapshot_failed:", 1, true) then
+    return error_payload(
+      request_id,
+      "render_snapshot_failed",
+      "REAPER could not create the isolated render snapshot.",
+      { command = envelope.command, error = error_text },
+      true,
+      "Check the snapshot directory and project media paths, then retry."
+    )
+  end
   if error_text:find("render_state_not_restored:", 1, true) then
     return error_payload(
       request_id,
@@ -6413,6 +8023,7 @@ local function poll_requests()
     return
   end
 
+  local pending_requests = {}
   local index = 0
   while true do
     local filename = reaper.EnumerateFiles(REQUESTS_DIR, index)
@@ -6420,12 +8031,16 @@ local function poll_requests()
       break
     end
     if filename:match("%.json$") then
-      process_request_file(filename)
-      if ACTIVE_RENDER_JOB then
-        break
-      end
+      pending_requests[#pending_requests + 1] = filename
     end
     index = index + 1
+  end
+
+  for _, filename in ipairs(pending_requests) do
+    process_request_file(filename)
+    if ACTIVE_RENDER_JOB then
+      break
+    end
   end
 
   reaper.defer(poll_requests)

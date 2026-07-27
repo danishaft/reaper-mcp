@@ -15,17 +15,23 @@ import pytest
 
 from reaper_mcp.bridge.file_bridge import FileBridgeClient
 from reaper_mcp.services.arrangement_service import ArrangementService
+from reaper_mcp.services.audio_analysis_service import AudioAnalysisService
 from reaper_mcp.services.automation_service import AutomationService
+from reaper_mcp.services.batch_service import BatchService
 from reaper_mcp.services.diagnostics_service import DiagnosticsService
 from reaper_mcp.services.freeze_service import FreezeService
 from reaper_mcp.services.fx_service import FxService
 from reaper_mcp.services.health_service import HealthService
 from reaper_mcp.services.media_service import MediaService
+from reaper_mcp.services.midi_controller_service import MidiControllerService
 from reaper_mcp.services.midi_transform_service import MidiTransformService
 from reaper_mcp.services.navigation_service import NavigationService
+from reaper_mcp.services.project_controls_service import ProjectControlsService
 from reaper_mcp.services.project_service import ProjectService
 from reaper_mcp.services.routing_service import RoutingService
 from reaper_mcp.services.take_service import TakeService
+from reaper_mcp.services.template_service import TemplateService
+from reaper_mcp.services.tempo_map_service import TempoMapService
 from reaper_mcp.services.tempo_service import TempoService
 from reaper_mcp.services.transport_service import TransportService
 from reaper_mcp.services.workflow_service import WorkflowService
@@ -84,6 +90,15 @@ def _fx_identity(fx: dict[str, Any]) -> dict[str, Any]:
         "track_guid": fx["track_guid"],
         "index": fx["index"],
         "expected_identity": fx["identity"],
+        "expected_name": fx["name"],
+        "expected_guid": fx["guid"],
+    }
+
+
+def _take_fx_identity(fx: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "take_guid": fx["take_guid"],
+        "index": fx["index"],
         "expected_name": fx["name"],
         "expected_guid": fx["guid"],
     }
@@ -1187,3 +1202,172 @@ async def test_reaper_automation_takes_and_navigation_acceptance() -> None:
 
     assert (await project.delete_track(track_guid))["changes_applied"] is True
     assert (await navigation.save_project())["saved"] is True
+
+
+@pytest.mark.asyncio
+async def test_reaper_producer_expansion_acceptance(tmp_path: Path) -> None:
+    """Verify the producer-focused bridge additions in an isolated project."""
+
+    bridge_dir = Path(os.environ["REAPER_MCP_BRIDGE_DIR"])
+    bridge = _bridge_client(bridge_dir)
+    project = ProjectService(bridge)
+    media = MediaService(bridge, [tmp_path])
+    audio_analysis = AudioAnalysisService(
+        [
+            tmp_path,
+            bridge_dir / "Media",
+            Path.home() / "Music" / "Reaper MCP Demos" / "Media",
+        ],
+        bridge_client=bridge,
+    )
+    controllers = MidiControllerService(bridge)
+    tempo_map = TempoMapService(bridge)
+    controls = ProjectControlsService(bridge)
+    fx = FxService(bridge)
+    routing = RoutingService(bridge)
+    templates = TemplateService(bridge, [tmp_path])
+    batch = BatchService(bridge)
+    workflows = WorkflowService(bridge)
+
+    source = await project.create_track("Expansion Source")
+    destination = await project.create_track("Expansion Destination")
+    assert source["ok"] is True
+    assert destination["ok"] is True
+    source_guid = source["track"]["guid"]
+    destination_guid = destination["track"]["guid"]
+
+    midi_item = await media.create_midi_item(source_guid)
+    assert midi_item["ok"] is True
+    take_guid = midi_item["item"]["active_take"]["guid"]
+    audio_path = tmp_path / "loudness-source.wav"
+    _write_test_wav(audio_path)
+    audio_item = await media.insert_audio_item(source_guid, str(audio_path), 2.0)
+    assert audio_item["ok"] is True
+    audio_take = (
+        await TakeService(bridge).list_item_takes(audio_item["item"]["guid"])
+    )["takes"][0]
+    loudness = await audio_analysis.calculate_take_loudness(audio_take["guid"])
+    assert loudness["ok"] is True
+    assert loudness["calculation_status"] in {-1, 1}
+    assert Path(loudness["analysis"]["path"]).name == audio_path.name
+    controller = {
+        "position": {"measure": 1, "beat": 1.0},
+        "event_type": "cc",
+        "controller": 1,
+        "value": 64,
+        "channel": 0,
+    }
+    added_controller = await controllers.add_events(take_guid, [controller])
+    assert added_controller["ok"] is True
+    listed_controllers = await controllers.list_events(take_guid)
+    assert listed_controllers["event_count"] == 1
+    event = listed_controllers["events"][0]
+    updated_controller = await controllers.update_event(
+        take_guid,
+        event["index"],
+        event["fingerprint"],
+        {**controller, "value": 96},
+    )
+    assert updated_controller["ok"] is True
+    event = updated_controller["updated_event"]
+    deleted_controller = await controllers.delete_events(
+        take_guid,
+        [{"index": event["index"], "expected_fingerprint": event["fingerprint"]}],
+    )
+    assert deleted_controller["deleted_count"] == 1
+
+    pattern = await workflows.create_midi_pattern(
+        destination_guid,
+        "arpeggio",
+        start_measure=1,
+        bars=2,
+        root_note=60,
+        mode="minor",
+        subdivision_beats=0.5,
+    )
+    assert pattern["ok"] is True
+    assert pattern["note_count"] > 0
+    assert pattern["pattern"] == "arpeggio"
+
+    created_marker = await tempo_map.create_marker(2.0, 128.0, 3, 4)
+    assert created_marker["ok"] is True
+    marker = next(
+        marker for marker in created_marker["markers"] if marker["bpm"] == 128.0
+    )
+    updated_marker = await tempo_map.update_marker(
+        marker["index"], marker["fingerprint"], 2.0, 132.0, 3, 4
+    )
+    assert updated_marker["ok"] is True
+    marker = next(
+        marker for marker in updated_marker["markers"] if marker["bpm"] == 132.0
+    )
+    assert (await tempo_map.delete_marker(marker["index"], marker["fingerprint"]))[
+        "ok"
+    ] is True
+
+    assert (await controls.get_grid())["ok"] is True
+    assert (await controls.set_grid(0.25, 0.1, 0, True))["ok"] is True
+    assert (await controls.get_metronome())["ok"] is True
+    assert (await controls.set_metronome(True))["ok"] is True
+    assert (await controls.get_playback_rate())["ok"] is True
+    assert (await controls.set_playback_rate(1.0))["ok"] is True
+
+    assert (await project.set_track_recording(source_guid, 0, True))["ok"] is True
+    assert (await project.set_track_folder_depth(source_guid, 1))["ok"] is True
+    assert (
+        await batch.update_tracks(
+            [
+                {
+                    "track_guid": source_guid,
+                    "name": "Expansion Source Updated",
+                    "volume": 0.8,
+                },
+                {"track_guid": destination_guid, "muted": True},
+            ]
+        )
+    )["ok"] is True
+
+    available_fx = await fx.list_available_fx()
+    assert available_fx["ok"] is True
+    eq = next(entry for entry in available_fx["fx"] if "ReaEQ" in entry["name"])
+    added_take_fx = await fx.add_take_fx(take_guid, eq["identifier"])
+    assert added_take_fx["ok"] is True
+    take_fx_identity = _take_fx_identity(added_take_fx["added_fx"])
+    listed_take_fx = await fx.list_take_fx(take_guid)
+    assert listed_take_fx["fx_count"] == 1
+    assert (await fx.set_take_fx_enabled(take_fx_identity, False))["ok"] is True
+    assert (await fx.remove_take_fx(take_fx_identity))["ok"] is True
+    added_fx = await fx.add_fx(source_guid, eq["identifier"])
+    assert added_fx["ok"] is True
+    fx_identity = _fx_identity(added_fx["added_fx"])
+    assert (await fx.get_fx_preset(fx_identity))["ok"] is True
+    preset_bank = await fx.get_fx_preset_index(fx_identity)
+    assert preset_bank["ok"] is True
+    if preset_bank["preset_count"] > 0:
+        assert (await fx.navigate_fx_presets(fx_identity, 1))["ok"] is True
+    compressor = next(
+        entry for entry in available_fx["fx"] if "ReaComp" in entry["name"]
+    )
+    assert (await fx.add_fx(source_guid, compressor["identifier"]))["ok"] is True
+    assert (await fx.move_fx(fx_identity, 1))["ok"] is True
+    assert (await fx.copy_fx_chain(source_guid, destination_guid))["ok"] is True
+
+    sidechain = await routing.setup_sidechain(source_guid, destination_guid)
+    assert sidechain["ok"] is True
+    assert sidechain["source_channels"] == "1/2"
+    assert sidechain["destination_channels"] == "3/4"
+
+    template_path = tmp_path / "Expansion.RTrackTemplate"
+    saved_template = await templates.save_template(source_guid, str(template_path))
+    assert saved_template["ok"] is True
+    assert template_path.is_file()
+    applied_template = await templates.apply_template(str(template_path))
+    assert applied_template["ok"] is True
+    assert applied_template["track"]["guid"] not in {
+        source_guid,
+        destination_guid,
+    }
+    assert (await templates.delete_template(str(template_path)))["ok"] is True
+
+    assert (await project.delete_track(source_guid))["ok"] is True
+    assert (await project.delete_track(destination_guid))["ok"] is True
