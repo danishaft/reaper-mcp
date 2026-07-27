@@ -14,10 +14,13 @@ dependencies = [
   "mcp>=1.0.0",
   "pydantic>=2.7",
   "pydantic-settings>=2.2",
+  "starlette>=0.37.0",
+  "uvicorn>=0.30.0",
 ]
 
 [project.scripts]
 reaper-mcp = "reaper_mcp.server:main"
+reaper-mcp-cli = "reaper_mcp.cli:main"
 reaper-mcp-install = "reaper_mcp.install:main"
 
 [dependency-groups]
