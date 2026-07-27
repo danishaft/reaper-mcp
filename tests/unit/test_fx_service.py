@@ -49,6 +49,24 @@ def fx_identity() -> dict:
     }
 
 
+def take_fx_payload(
+    index: int = 0,
+    identity: str = "{TAKE-GUID}:0:{FX-GUID}",
+    name: str = "VST: ReaEQ",
+    enabled: bool = True,
+    guid: str | None = "{FX-GUID}",
+) -> dict:
+    return {
+        "identity": identity,
+        "take_guid": "{TAKE-GUID}",
+        "index": index,
+        "name": name,
+        "enabled": enabled,
+        "offline": False,
+        "guid": guid,
+    }
+
+
 def fx_parameter_payload(
     index: int = 0,
     name: str = "Gain",
@@ -60,6 +78,21 @@ def fx_parameter_payload(
         "name": name,
         "normalized_value": normalized_value,
         "formatted_value": formatted_value,
+    }
+
+
+def fx_preset_bank_payload(
+    preset_index: int = 0,
+    preset_count: int = 4,
+    preset_name: str = "Clean vocal",
+    changes_applied: bool = False,
+) -> dict:
+    return {
+        "fx_identity": fx_identity(),
+        "preset_index": preset_index,
+        "preset_count": preset_count,
+        "preset_name": preset_name,
+        "changes_applied": changes_applied,
     }
 
 
@@ -160,6 +193,35 @@ async def test_fx_service_adds_fx_with_undo_options() -> None:
         undo_label="Add FX: VST: ReaEQ",
     )
     assert result["added_fx"]["identity"] == "{TRACK-GUID}:0:{FX-GUID}"
+
+
+async def test_fx_service_adds_take_fx_with_typed_identity() -> None:
+    bridge = FakeBridgeClient(
+        BridgeResponse(
+            id="request-1",
+            ok=True,
+            result={
+                "take_guid": "{TAKE-GUID}",
+                "fx_count": 1,
+                "added_fx": take_fx_payload(),
+                "fx": [take_fx_payload()],
+                "changes_applied": True,
+            },
+        )
+    )
+    service = FxService(bridge)
+
+    result = await service.add_take_fx(
+        take_guid="{TAKE-GUID}",
+        fx_identifier="VST: ReaEQ",
+    )
+
+    assert bridge.command == "add_take_fx"
+    assert bridge.options == CommandOptions(
+        mutates_project=True,
+        undo_label="Add take FX: VST: ReaEQ",
+    )
+    assert result["added_fx"]["identity"] == "{TAKE-GUID}:0:{FX-GUID}"
 
 
 async def test_fx_service_removes_fx_with_identity_guard() -> None:
@@ -277,3 +339,130 @@ async def test_fx_service_sets_fx_parameter_with_identity_guard_and_undo() -> No
         undo_label="Set FX parameter: VST: ReaEQ",
     )
     assert result["updated_parameter"] == updated_parameter
+
+
+async def test_fx_service_sets_fx_preset_with_identity_guard_and_undo() -> None:
+    bridge = FakeBridgeClient(
+        BridgeResponse(
+            id="request-1",
+            ok=True,
+            result={
+                "fx_identity": fx_identity(),
+                "preset_name": "Clean vocal",
+                "changes_applied": True,
+            },
+        )
+    )
+
+    result = await FxService(bridge).set_fx_preset(fx_identity(), "Clean vocal")
+
+    assert bridge.command == "set_fx_preset"
+    assert bridge.options == CommandOptions(
+        mutates_project=True,
+        undo_label="Set FX preset: Clean vocal",
+    )
+    assert result["preset_name"] == "Clean vocal"
+
+
+async def test_fx_service_gets_fx_preset_index() -> None:
+    bridge = FakeBridgeClient(
+        BridgeResponse(
+            id="request-1",
+            ok=True,
+            result=fx_preset_bank_payload(),
+        )
+    )
+
+    result = await FxService(bridge).get_fx_preset_index(fx_identity())
+
+    assert bridge.command == "get_fx_preset_index"
+    assert bridge.args == {"fx_identity": fx_identity()}
+    assert bridge.options is None
+    assert result["preset_index"] == 0
+    assert result["preset_count"] == 4
+
+
+async def test_fx_service_sets_fx_preset_index_with_undo() -> None:
+    bridge = FakeBridgeClient(
+        BridgeResponse(
+            id="request-1",
+            ok=True,
+            result=fx_preset_bank_payload(
+                preset_index=-2,
+                preset_name="Factory default",
+                changes_applied=True,
+            ),
+        )
+    )
+
+    result = await FxService(bridge).set_fx_preset_index(fx_identity(), -2)
+
+    assert bridge.command == "set_fx_preset_index"
+    assert bridge.args == {"fx_identity": fx_identity(), "preset_index": -2}
+    assert bridge.options == CommandOptions(
+        mutates_project=True,
+        undo_label="Set FX preset index: -2",
+    )
+    assert result["changes_applied"] is True
+
+
+async def test_fx_service_navigates_fx_presets_with_undo() -> None:
+    bridge = FakeBridgeClient(
+        BridgeResponse(
+            id="request-1",
+            ok=True,
+            result=fx_preset_bank_payload(
+                preset_index=1,
+                preset_name="Bright vocal",
+                changes_applied=True,
+            ),
+        )
+    )
+
+    result = await FxService(bridge).navigate_fx_presets(fx_identity(), 1)
+
+    assert bridge.command == "navigate_fx_presets"
+    assert bridge.args == {"fx_identity": fx_identity(), "direction": 1}
+    assert bridge.options == CommandOptions(
+        mutates_project=True,
+        undo_label="Navigate FX presets: 1",
+    )
+    assert result["preset_name"] == "Bright vocal"
+
+
+async def test_fx_service_copies_fx_chain_with_undo() -> None:
+    bridge = FakeBridgeClient(
+        BridgeResponse(
+            id="request-1",
+            ok=True,
+            result={
+                "source_track_guid": "{SOURCE-GUID}",
+                "track_guid": "{DESTINATION-GUID}",
+                "fx_count": 1,
+                "fx": [
+                    {
+                        **fx_payload(),
+                        "track_guid": "{DESTINATION-GUID}",
+                        "identity": "{DESTINATION-GUID}:0:{FX-GUID}",
+                    }
+                ],
+                "changes_applied": True,
+            },
+        )
+    )
+
+    result = await FxService(bridge).copy_fx_chain(
+        "{SOURCE-GUID}", "{DESTINATION-GUID}"
+    )
+
+    assert bridge.command == "copy_fx_chain"
+    assert bridge.args == {
+        "source_track_guid": "{SOURCE-GUID}",
+        "destination_track_guid": "{DESTINATION-GUID}",
+        "replace_destination": False,
+    }
+    assert bridge.options == CommandOptions(
+        mutates_project=True,
+        undo_label="Copy FX chain",
+    )
+    assert result["fx_count"] == 1
