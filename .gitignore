@@ -10,6 +10,7 @@ dist/
 # Local bridge, test, and render artifacts
 reaper-mcp-bridge/
 *.rpp-bak
+*.reapeaks
 *.wav
 
 # Demo media is downloaded/generated locally and is not repository content.
