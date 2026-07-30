@@ -79,6 +79,26 @@ def register_media_tools(server: FastMCP, service: MediaService) -> None:
         return await service.move_media_item(item_guid, measure, beat)
 
     @server.tool(
+        name="move_media_item_to_track",
+        description=(
+            "Move one media item to another track after verifying its expected "
+            "source track. The item's timeline position and take offsets are "
+            "preserved and verified. This mutates the project in one named "
+            "undo block."
+        ),
+    )
+    async def move_media_item_to_track(
+        item_guid: str,
+        destination_track_guid: str,
+        expected_source_track_guid: str,
+    ) -> dict[str, Any]:
+        return await service.move_media_item_to_track(
+            item_guid,
+            destination_track_guid,
+            expected_source_track_guid,
+        )
+
+    @server.tool(
         name="resize_media_item",
         description=(
             "Set one media item's length in beats by stable item GUID. "

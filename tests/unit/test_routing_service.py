@@ -150,3 +150,61 @@ async def test_routing_service_rejects_self_send_and_empty_update() -> None:
     assert bridge.command is None
     assert self_send["error"]["code"] == "invalid_send_request"
     assert empty_update["error"]["code"] == "invalid_send_request"
+
+
+async def test_routing_service_configures_reference_track_with_undo() -> None:
+    bridge = FakeBridgeClient(
+        BridgeResponse(
+            id="request-1",
+            ok=True,
+            result={
+                "track_guid": "{REFERENCE}",
+                "master_send_enabled": False,
+                "hardware_output": {
+                    "identity": "{REFERENCE}:hardware:0:0",
+                    "source_track_guid": "{REFERENCE}",
+                    "index": 0,
+                    "hardware_output_pair": 1,
+                    "destination_channels": "1/2",
+                    "volume": 0.5,
+                    "pan": 0.0,
+                    "muted": False,
+                    "send_mode": 0,
+                },
+                "hardware_send_created": True,
+                "changes_applied": True,
+            },
+        )
+    )
+
+    result = await RoutingService(bridge).configure_reference_track(
+        "{REFERENCE}",
+        hardware_output_pair=1,
+        volume=0.5,
+    )
+
+    assert bridge.command == "configure_reference_track"
+    assert bridge.args == {
+        "track_guid": "{REFERENCE}",
+        "hardware_output_pair": 1,
+        "volume": 0.5,
+        "pan": 0.0,
+    }
+    assert bridge.options == CommandOptions(
+        mutates_project=True,
+        undo_label="Configure reference track routing",
+    )
+    assert result["master_send_enabled"] is False
+    assert result["hardware_output"]["destination_channels"] == "1/2"
+
+
+async def test_routing_service_rejects_invalid_reference_output_pair() -> None:
+    bridge = FakeBridgeClient(BridgeResponse(id="request-1", ok=True, result={}))
+
+    result = await RoutingService(bridge).configure_reference_track(
+        "{REFERENCE}",
+        hardware_output_pair=0,
+    )
+
+    assert bridge.command is None
+    assert result["error"]["code"] == "invalid_send_request"

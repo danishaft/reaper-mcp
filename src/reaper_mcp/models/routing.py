@@ -129,3 +129,42 @@ class SidechainResult(BaseModel):
     source_channels: str = "1/2"
     destination_channels: str = "3/4"
     changes_applied: bool = True
+
+
+class ConfigureReferenceTrackRequest(BaseModel):
+    """Input for routing a reference track around the master FX chain."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    track_guid: str = Field(min_length=1)
+    hardware_output_pair: int = Field(default=1, ge=1, le=64)
+    volume: float = Field(default=1.0, ge=0.0, le=4.0)
+    pan: float = Field(default=0.0, ge=-1.0, le=1.0)
+
+
+class HardwareOutputSnapshot(BaseModel):
+    """Observed state for one direct hardware output send."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    identity: str = Field(min_length=1)
+    source_track_guid: str = Field(min_length=1)
+    index: int = Field(ge=0)
+    hardware_output_pair: int = Field(ge=1, le=64)
+    destination_channels: str = Field(min_length=1)
+    volume: float = Field(ge=0.0)
+    pan: float = Field(ge=-1.0, le=1.0)
+    muted: bool = False
+    send_mode: int = Field(ge=0)
+
+
+class ConfigureReferenceTrackResult(BaseModel):
+    """Verified routing state for a master-FX-bypassed reference track."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    track_guid: str = Field(min_length=1)
+    master_send_enabled: bool = False
+    hardware_output: HardwareOutputSnapshot
+    hardware_send_created: bool
+    changes_applied: bool

@@ -19,6 +19,7 @@ from reaper_mcp.models.fx import (
     FxParameterList,
     FxPresetBankResult,
     FxPresetResult,
+    FxSnapshot,
     GetFxParametersRequest,
     MoveFxRequest,
     MoveFxResult,
@@ -37,6 +38,7 @@ from reaper_mcp.models.fx import (
     SetTakeFxEnabledResult,
     TakeFxList,
     TakeFxRequest,
+    TakeFxSnapshot,
     TrackFxList,
     TrackFxRequest,
 )
@@ -66,7 +68,9 @@ class FxService:
             return self._invalid_payload_result(response, exc)
         return {
             "ok": True,
-            **result.model_dump(mode="json"),
+            "take_guid": result.take_guid,
+            "fx": [self._take_fx_payload(fx) for fx in result.fx],
+            "fx_count": result.fx_count,
             "warnings": response.warnings,
         }
 
@@ -150,7 +154,7 @@ class FxService:
         }
 
     async def list_track_fx(self, track_guid: str) -> dict[str, Any]:
-        """Return FX on one track by stable track GUID."""
+        """Return FX on an ordinary or master track by stable GUID."""
 
         try:
             request = TrackFxRequest(track_guid=track_guid)
@@ -172,7 +176,7 @@ class FxService:
         return {
             "ok": True,
             "track_guid": result.track_guid,
-            "fx": [fx.model_dump(mode="json") for fx in result.fx],
+            "fx": [self._fx_payload(fx) for fx in result.fx],
             "fx_count": result.fx_count,
             "warnings": response.warnings,
         }
@@ -184,7 +188,7 @@ class FxService:
         index: int | None = None,
         enabled: bool = True,
     ) -> dict[str, Any]:
-        """Add one FX to a track."""
+        """Add one FX to an ordinary or master track."""
 
         try:
             request = AddFxRequest(
@@ -215,8 +219,8 @@ class FxService:
         return {
             "ok": True,
             "track_guid": result.track_guid,
-            "added_fx": result.added_fx.model_dump(mode="json"),
-            "fx": [fx.model_dump(mode="json") for fx in result.fx],
+            "added_fx": self._fx_payload(result.added_fx),
+            "fx": [self._fx_payload(fx) for fx in result.fx],
             "fx_count": result.fx_count,
             "changes_applied": result.changes_applied,
             "warnings": response.warnings,
@@ -250,7 +254,7 @@ class FxService:
             "ok": True,
             "track_guid": result.track_guid,
             "removed_fx_identity": result.removed_fx_identity,
-            "fx": [fx.model_dump(mode="json") for fx in result.fx],
+            "fx": [self._fx_payload(fx) for fx in result.fx],
             "fx_count": result.fx_count,
             "changes_applied": result.changes_applied,
             "warnings": response.warnings,
@@ -290,8 +294,8 @@ class FxService:
         return {
             "ok": True,
             "track_guid": result.track_guid,
-            "updated_fx": result.updated_fx.model_dump(mode="json"),
-            "fx": [fx.model_dump(mode="json") for fx in result.fx],
+            "updated_fx": self._fx_payload(result.updated_fx),
+            "fx": [self._fx_payload(fx) for fx in result.fx],
             "fx_count": result.fx_count,
             "changes_applied": result.changes_applied,
             "warnings": response.warnings,
@@ -486,8 +490,8 @@ class FxService:
         return {
             "ok": True,
             "track_guid": result.track_guid,
-            "moved_fx": result.moved_fx.model_dump(mode="json"),
-            "fx": [fx.model_dump(mode="json") for fx in result.fx],
+            "moved_fx": self._fx_payload(result.moved_fx),
+            "fx": [self._fx_payload(fx) for fx in result.fx],
             "fx_count": result.fx_count,
             "changes_applied": result.changes_applied,
             "warnings": response.warnings,
@@ -527,7 +531,7 @@ class FxService:
             "ok": True,
             "source_track_guid": result.source_track_guid,
             "track_guid": result.track_guid,
-            "fx": [fx.model_dump(mode="json") for fx in result.fx],
+            "fx": [self._fx_payload(fx) for fx in result.fx],
             "fx_count": result.fx_count,
             "changes_applied": result.changes_applied,
             "warnings": response.warnings,
@@ -559,11 +563,40 @@ class FxService:
             result = result_type.model_validate(response.result or {})
         except ValidationError as exc:
             return self._invalid_payload_result(response, exc)
+        payload = result.model_dump(mode="json")
+        payload["fx"] = [self._take_fx_payload(fx) for fx in result.fx]
+        for field_name in ("added_fx", "updated_fx"):
+            snapshot = getattr(result, field_name, None)
+            if snapshot is not None:
+                payload[field_name] = self._take_fx_payload(snapshot)
         return {
             "ok": True,
-            **result.model_dump(mode="json"),
+            **payload,
             "warnings": response.warnings,
         }
+
+    @staticmethod
+    def _fx_payload(snapshot: FxSnapshot) -> dict[str, Any]:
+        payload = snapshot.model_dump(mode="json")
+        payload["fx_identity"] = {
+            "track_guid": snapshot.track_guid,
+            "index": snapshot.index,
+            "expected_identity": snapshot.identity,
+            "expected_name": snapshot.name,
+            "expected_guid": snapshot.guid,
+        }
+        return payload
+
+    @staticmethod
+    def _take_fx_payload(snapshot: TakeFxSnapshot) -> dict[str, Any]:
+        payload = snapshot.model_dump(mode="json")
+        payload["fx_identity"] = {
+            "take_guid": snapshot.take_guid,
+            "index": snapshot.index,
+            "expected_name": snapshot.name,
+            "expected_guid": snapshot.guid,
+        }
+        return payload
 
     def _preset_bank_result(self, response: BridgeResponse) -> dict[str, Any]:
         if not response.ok:

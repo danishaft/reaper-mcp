@@ -99,7 +99,29 @@ class FileBridgeClient:
             await asyncio.sleep(self.poll_interval_seconds)
 
         self._safe_unlink(request_path)
-        if self._heartbeat_is_stale():
+        heartbeat_is_stale = self._heartbeat_is_stale()
+        if envelope.options.mutates_project:
+            response = BridgeResponse(
+                id=envelope.id,
+                ok=False,
+                error=ErrorResponse(
+                    code=ErrorCode.OUTCOME_UNCERTAIN,
+                    message=(
+                        "The mutating command timed out after publication, so its "
+                        "outcome is uncertain."
+                    ),
+                    details={
+                        "timeout_seconds": self.timeout_seconds,
+                        "heartbeat_is_stale": heartbeat_is_stale,
+                    },
+                    recoverable=True,
+                    suggested_action=(
+                        "Refresh the affected REAPER project state before deciding "
+                        "whether to retry."
+                    ),
+                ),
+            )
+        elif heartbeat_is_stale:
             response = BridgeResponse(
                 id=envelope.id,
                 ok=False,
@@ -187,8 +209,15 @@ class FileBridgeClient:
     def _read_response(self, request_id: str, response_path: Path) -> BridgeResponse:
         try:
             payload = json.loads(response_path.read_text(encoding="utf-8"))
-            return BridgeResponse.model_validate(payload)
-        except (OSError, json.JSONDecodeError, ValidationError) as exc:
+            response = BridgeResponse.model_validate(payload)
+            if response.id != request_id:
+                msg = (
+                    f"Response id {response.id!r} does not match request id "
+                    f"{request_id!r}."
+                )
+                raise ValueError(msg)
+            return response
+        except (OSError, ValueError, json.JSONDecodeError, ValidationError) as exc:
             return BridgeResponse(
                 id=request_id,
                 ok=False,

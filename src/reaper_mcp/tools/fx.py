@@ -4,6 +4,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from reaper_mcp.models.fx import FxIdentity, TakeFxIdentity
 from reaper_mcp.services.fx_service import FxService
 
 
@@ -23,8 +24,8 @@ def register_fx_tools(server: FastMCP, service: FxService) -> None:
     @server.tool(
         name="list_track_fx",
         description=(
-            "Return FX on one track by stable track GUID. "
-            "This tool does not change the REAPER project."
+            "Return FX on an ordinary track or the master track by stable GUID. "
+            "Use get_master_track to read the master GUID."
         ),
     )
     async def list_track_fx(track_guid: str) -> dict[str, Any]:
@@ -51,25 +52,33 @@ def register_fx_tools(server: FastMCP, service: FxService) -> None:
 
     @server.tool(
         name="remove_take_fx",
-        description="Remove one take FX after checking its guarded identity.",
+        description=(
+            "Remove one take FX after checking its guarded identity. Pass the "
+            "fx_identity object returned with the take FX snapshot."
+        ),
     )
-    async def remove_take_fx(fx_identity: dict[str, Any]) -> dict[str, Any]:
-        return await service.remove_take_fx(fx_identity)
+    async def remove_take_fx(fx_identity: TakeFxIdentity) -> dict[str, Any]:
+        return await service.remove_take_fx(fx_identity.model_dump(mode="json"))
 
     @server.tool(
         name="set_take_fx_enabled",
-        description="Set one take FX enabled state after checking its identity.",
+        description=(
+            "Set one take FX enabled state after checking its identity. Pass the "
+            "fx_identity object returned with the take FX snapshot."
+        ),
     )
     async def set_take_fx_enabled(
-        fx_identity: dict[str, Any], enabled: bool
+        fx_identity: TakeFxIdentity, enabled: bool
     ) -> dict[str, Any]:
-        return await service.set_take_fx_enabled(fx_identity, enabled)
+        return await service.set_take_fx_enabled(
+            fx_identity.model_dump(mode="json"), enabled
+        )
 
     @server.tool(
         name="add_fx",
         description=(
-            "Add one FX to a track by stable track GUID and FX identifier. "
-            "This mutates the project in one named undo block."
+            "Add one FX to an ordinary track or the master track by stable GUID "
+            "and FX identifier in one named undo block."
         ),
     )
     async def add_fx(
@@ -88,111 +97,142 @@ def register_fx_tools(server: FastMCP, service: FxService) -> None:
     @server.tool(
         name="remove_fx",
         description=(
-            "Remove one FX after checking its guarded identity. "
+            "Remove one FX after checking its guarded identity. Pass the fx_identity "
+            "object returned with the FX snapshot. "
             "This mutates the project in one named undo block."
         ),
     )
-    async def remove_fx(fx_identity: dict[str, Any]) -> dict[str, Any]:
-        return await service.remove_fx(fx_identity=fx_identity)
+    async def remove_fx(fx_identity: FxIdentity) -> dict[str, Any]:
+        return await service.remove_fx(fx_identity=fx_identity.model_dump(mode="json"))
 
     @server.tool(
         name="set_fx_enabled",
         description=(
-            "Set one FX enabled state after checking its guarded identity. "
+            "Set one FX enabled state after checking its guarded identity. Pass the "
+            "fx_identity object returned with the FX snapshot. "
             "This mutates the project in one named undo block."
         ),
     )
     async def set_fx_enabled(
-        fx_identity: dict[str, Any],
+        fx_identity: FxIdentity,
         enabled: bool,
     ) -> dict[str, Any]:
         return await service.set_fx_enabled(
-            fx_identity=fx_identity,
+            fx_identity=fx_identity.model_dump(mode="json"),
             enabled=enabled,
         )
 
     @server.tool(
         name="get_fx_parameters",
         description=(
-            "Return parameters for one FX after checking its guarded identity. "
+            "Return parameters for one FX after checking its guarded identity. Pass "
+            "the fx_identity object returned with the FX snapshot. "
             "This tool does not change the REAPER project."
         ),
     )
-    async def get_fx_parameters(fx_identity: dict[str, Any]) -> dict[str, Any]:
-        return await service.get_fx_parameters(fx_identity=fx_identity)
+    async def get_fx_parameters(fx_identity: FxIdentity) -> dict[str, Any]:
+        return await service.get_fx_parameters(
+            fx_identity=fx_identity.model_dump(mode="json")
+        )
 
     @server.tool(
         name="set_fx_parameter",
         description=(
             "Set one FX parameter by guarded FX identity and normalized value "
-            "from 0.0 to 1.0. This mutates the project in one named undo block."
+            "from 0.0 to 1.0. Pass the fx_identity object returned with the FX "
+            "snapshot. This mutates the project in one named undo block."
         ),
     )
     async def set_fx_parameter(
-        fx_identity: dict[str, Any],
+        fx_identity: FxIdentity,
         parameter_index: int,
         normalized_value: float,
     ) -> dict[str, Any]:
         return await service.set_fx_parameter(
-            fx_identity=fx_identity,
+            fx_identity=fx_identity.model_dump(mode="json"),
             parameter_index=parameter_index,
             normalized_value=normalized_value,
         )
 
-    @server.tool(name="get_fx_preset", description="Read one guarded FX preset name.")
-    async def get_fx_preset(fx_identity: dict[str, Any]) -> dict[str, Any]:
-        return await service.get_fx_preset(fx_identity)
+    @server.tool(
+        name="get_fx_preset",
+        description=(
+            "Read one guarded FX preset name using the fx_identity object returned "
+            "with the FX snapshot."
+        ),
+    )
+    async def get_fx_preset(fx_identity: FxIdentity) -> dict[str, Any]:
+        return await service.get_fx_preset(fx_identity.model_dump(mode="json"))
 
     @server.tool(
         name="set_fx_preset",
-        description="Set one guarded FX preset in one named undo block.",
+        description=(
+            "Set one guarded FX preset in one named undo block using the fx_identity "
+            "object returned with the FX snapshot."
+        ),
     )
     async def set_fx_preset(
-        fx_identity: dict[str, Any], preset_name: str
+        fx_identity: FxIdentity, preset_name: str
     ) -> dict[str, Any]:
-        return await service.set_fx_preset(fx_identity, preset_name)
+        return await service.set_fx_preset(
+            fx_identity.model_dump(mode="json"), preset_name
+        )
 
     @server.tool(
         name="get_fx_preset_index",
-        description="Read the current preset index and count for one guarded FX.",
+        description=(
+            "Read the current preset index and count using the fx_identity object "
+            "returned with the FX snapshot."
+        ),
     )
     async def get_fx_preset_index(
-        fx_identity: dict[str, Any],
+        fx_identity: FxIdentity,
     ) -> dict[str, Any]:
-        return await service.get_fx_preset_index(fx_identity)
+        return await service.get_fx_preset_index(fx_identity.model_dump(mode="json"))
 
     @server.tool(
         name="set_fx_preset_index",
         description=(
             "Select a factory or user preset by index for one guarded FX in one "
-            "named undo block. Use -2 for factory and -1 for default user preset."
+            "named undo block. Pass the fx_identity object returned with the FX "
+            "snapshot. Use -2 for factory and -1 for default user preset."
         ),
     )
     async def set_fx_preset_index(
-        fx_identity: dict[str, Any], preset_index: int
+        fx_identity: FxIdentity, preset_index: int
     ) -> dict[str, Any]:
-        return await service.set_fx_preset_index(fx_identity, preset_index)
+        return await service.set_fx_preset_index(
+            fx_identity.model_dump(mode="json"), preset_index
+        )
 
     @server.tool(
         name="navigate_fx_presets",
         description=(
             "Move within one guarded FX preset bank. Positive direction moves "
-            "forward; negative direction moves backward."
+            "forward; negative direction moves backward. Pass the fx_identity "
+            "object returned with the FX snapshot."
         ),
     )
     async def navigate_fx_presets(
-        fx_identity: dict[str, Any], direction: int
+        fx_identity: FxIdentity, direction: int
     ) -> dict[str, Any]:
-        return await service.navigate_fx_presets(fx_identity, direction)
+        return await service.navigate_fx_presets(
+            fx_identity.model_dump(mode="json"), direction
+        )
 
     @server.tool(
         name="move_fx",
-        description="Move one guarded FX within its track chain in one undo block.",
+        description=(
+            "Move one guarded FX within its track chain in one undo block. Pass the "
+            "fx_identity object returned with the FX snapshot."
+        ),
     )
     async def move_fx(
-        fx_identity: dict[str, Any], destination_index: int
+        fx_identity: FxIdentity, destination_index: int
     ) -> dict[str, Any]:
-        return await service.move_fx(fx_identity, destination_index)
+        return await service.move_fx(
+            fx_identity.model_dump(mode="json"), destination_index
+        )
 
     @server.tool(
         name="copy_fx_chain",

@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class TrackFxRequest(BaseModel):
-    """Input for listing FX on one track."""
+    """Input for listing FX on one ordinary track or the master track."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -103,20 +103,6 @@ class SetTakeFxEnabledRequest(BaseModel):
     enabled: bool
 
 
-class FxSnapshot(BaseModel):
-    """Read-only FX state for one track FX slot."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    identity: str = Field(min_length=1)
-    track_guid: str = Field(min_length=1)
-    index: int = Field(ge=0)
-    name: str = Field(min_length=1)
-    enabled: bool = True
-    offline: bool = False
-    guid: str | None = None
-
-
 class AvailableFxSnapshot(BaseModel):
     """Read-only installed FX entry."""
 
@@ -137,7 +123,7 @@ class AvailableFxList(BaseModel):
 
 
 class FxIdentity(BaseModel):
-    """Guarded identity for mutating one track FX slot."""
+    """Guarded identity for mutating an ordinary- or master-track FX slot."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -148,8 +134,25 @@ class FxIdentity(BaseModel):
     expected_guid: str | None = None
 
 
+class FxSnapshot(BaseModel):
+    """Read-only FX state for one ordinary-track or master-track FX slot."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    identity: str = Field(min_length=1)
+    track_guid: str = Field(min_length=1)
+    index: int = Field(ge=0)
+    name: str = Field(min_length=1)
+    enabled: bool = True
+    offline: bool = False
+    guid: str | None = None
+    identifier: str | None = None
+    latency_samples: int | None = Field(default=None, ge=0)
+    gain_reduction_db: float | None = None
+
+
 class TrackFxList(BaseModel):
-    """Read-only list of FX on one track."""
+    """Read-only list of FX on one ordinary track or the master track."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -165,8 +168,11 @@ class FxParameterSnapshot(BaseModel):
 
     index: int = Field(ge=0)
     name: str = Field(min_length=1)
-    normalized_value: float = Field(ge=0.0, le=1.0)
+    normalized_value: float
     formatted_value: str = ""
+    minimum_value: float | None = None
+    maximum_value: float | None = None
+    midpoint_value: float | None = None
 
 
 class FxParameterList(BaseModel):
@@ -180,7 +186,7 @@ class FxParameterList(BaseModel):
 
 
 class AddFxRequest(BaseModel):
-    """Input for adding one FX to a track."""
+    """Input for adding one FX to an ordinary track or the master track."""
 
     model_config = ConfigDict(extra="forbid")
 

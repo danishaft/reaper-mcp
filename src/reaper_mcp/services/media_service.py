@@ -26,6 +26,8 @@ from reaper_mcp.models.media import (
     MediaItemMutationResult,
     MidiNoteList,
     MoveMediaItemRequest,
+    MoveMediaItemToTrackRequest,
+    MoveMediaItemToTrackResult,
     ResizeMediaItemRequest,
     SetMediaItemFadeRequest,
     SetMediaItemGainRequest,
@@ -185,6 +187,47 @@ class MediaService:
             request.model_dump(mode="json"),
             "Move media item",
         )
+
+    async def move_media_item_to_track(
+        self,
+        item_guid: str,
+        destination_track_guid: str,
+        expected_source_track_guid: str,
+    ) -> dict[str, Any]:
+        """Move one media item to a guarded destination track."""
+
+        try:
+            request = MoveMediaItemToTrackRequest(
+                item_guid=item_guid,
+                destination_track_guid=destination_track_guid,
+                expected_source_track_guid=expected_source_track_guid,
+            )
+        except ValidationError as exc:
+            return self._validation_error_result(exc)
+        response = await self.bridge_client.execute(
+            "move_media_item_to_track",
+            args=request.model_dump(mode="json"),
+            options=CommandOptions(
+                mutates_project=True,
+                undo_label="Move media item to track",
+            ),
+        )
+        if not response.ok:
+            return self._error_result(response)
+        try:
+            result = MoveMediaItemToTrackResult.model_validate(response.result or {})
+        except ValidationError as exc:
+            return self._invalid_payload_result(response, exc)
+        return {
+            "ok": True,
+            "source_track_guid": result.source_track_guid,
+            "destination_track_guid": result.destination_track_guid,
+            "item": result.item.model_dump(mode="json"),
+            "position_preserved": result.position_preserved,
+            "take_offsets_preserved": result.take_offsets_preserved,
+            "changes_applied": result.changes_applied,
+            "warnings": response.warnings,
+        }
 
     async def resize_media_item(
         self,

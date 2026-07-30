@@ -107,6 +107,21 @@ class MoveMediaItemRequest(MediaItemGuidRequest):
     start: MusicalPosition
 
 
+class MoveMediaItemToTrackRequest(MediaItemGuidRequest):
+    """Input for moving one media item between guarded tracks."""
+
+    destination_track_guid: str = Field(min_length=1)
+    expected_source_track_guid: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def require_distinct_tracks(self) -> Self:
+        """Reject a no-op destination before bridge execution."""
+
+        if self.destination_track_guid == self.expected_source_track_guid:
+            raise ValueError("destination track must differ from the source track")
+        return self
+
+
 class ResizeMediaItemRequest(MediaItemGuidRequest):
     """Input for setting one media item's musical length."""
 
@@ -144,6 +159,15 @@ class MediaItemMutationResult(BaseModel):
 
     item: MediaItemSnapshot
     changes_applied: bool = True
+
+
+class MoveMediaItemToTrackResult(MediaItemMutationResult):
+    """Verified result after moving one media item between tracks."""
+
+    source_track_guid: str = Field(min_length=1)
+    destination_track_guid: str = Field(min_length=1)
+    position_preserved: bool
+    take_offsets_preserved: bool
 
 
 class DuplicateMediaItemResult(MediaItemMutationResult):

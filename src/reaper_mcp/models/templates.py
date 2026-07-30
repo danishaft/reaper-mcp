@@ -14,6 +14,7 @@ class TrackTemplateSnapshot(BaseModel):
 
     name: str = Field(min_length=1)
     path: Path
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class TrackTemplateList(BaseModel):

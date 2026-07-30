@@ -223,6 +223,49 @@ async def test_media_service_moves_and_resizes_item_by_guid() -> None:
     assert resize_result["item"]["length_seconds"] == 4.0
 
 
+async def test_media_service_moves_item_to_guarded_track() -> None:
+    moved_item = {
+        **item_payload(),
+        "track_guid": "{DESTINATION-TRACK-GUID}",
+    }
+    bridge = FakeBridgeClient(
+        BridgeResponse(
+            id="request-1",
+            ok=True,
+            result={
+                "source_track_guid": "{TRACK-GUID}",
+                "destination_track_guid": "{DESTINATION-TRACK-GUID}",
+                "item": moved_item,
+                "position_preserved": True,
+                "take_offsets_preserved": True,
+                "changes_applied": True,
+            },
+        )
+    )
+
+    result = await MediaService(bridge).move_media_item_to_track(
+        "{ITEM-GUID}",
+        "{DESTINATION-TRACK-GUID}",
+        "{TRACK-GUID}",
+    )
+
+    assert bridge.command == "move_media_item_to_track"
+    assert bridge.args == {
+        "item_guid": "{ITEM-GUID}",
+        "destination_track_guid": "{DESTINATION-TRACK-GUID}",
+        "expected_source_track_guid": "{TRACK-GUID}",
+    }
+    assert bridge.options == CommandOptions(
+        mutates_project=True,
+        undo_label="Move media item to track",
+    )
+    assert result["item"]["track_guid"] == "{DESTINATION-TRACK-GUID}"
+    assert result["source_track_guid"] == "{TRACK-GUID}"
+    assert result["destination_track_guid"] == "{DESTINATION-TRACK-GUID}"
+    assert result["position_preserved"] is True
+    assert result["take_offsets_preserved"] is True
+
+
 async def test_media_service_duplicates_item_with_selection_restoration() -> None:
     duplicated_item = {
         **item_payload(),
@@ -351,6 +394,11 @@ async def test_media_service_rejects_invalid_item_edits_before_bridge() -> None:
 
     invalid_results = [
         await service.split_media_item("{ITEM-GUID}", measure=0),
+        await service.move_media_item_to_track(
+            "{ITEM-GUID}",
+            "{TRACK-GUID}",
+            "{TRACK-GUID}",
+        ),
         await service.set_media_item_gain("{ITEM-GUID}", 4.1),
         await service.set_media_item_fade_in("{ITEM-GUID}", -0.1),
     ]

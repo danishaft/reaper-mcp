@@ -98,3 +98,25 @@ def register_routing_tools(server: FastMCP, service: RoutingService) -> None:
         return await service.setup_sidechain(
             source_track_guid, destination_track_guid, amount
         )
+
+    @server.tool(
+        name="configure_reference_track",
+        description=(
+            "Route one track directly to a stereo hardware output and disable "
+            "its master send so reference audio bypasses master-bus FX. The "
+            "track fader, pan, mute, and solo still control auditioning. This "
+            "mutates the project in one named undo block."
+        ),
+    )
+    async def configure_reference_track(
+        track_guid: str,
+        hardware_output_pair: int = 1,
+        volume: float = 1.0,
+        pan: float = 0.0,
+    ) -> dict[str, Any]:
+        return await service.configure_reference_track(
+            track_guid,
+            hardware_output_pair,
+            volume,
+            pan,
+        )

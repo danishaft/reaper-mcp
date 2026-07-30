@@ -78,6 +78,9 @@ def fx_parameter_payload(
         "name": name,
         "normalized_value": normalized_value,
         "formatted_value": formatted_value,
+        "minimum_value": None,
+        "maximum_value": None,
+        "midpoint_value": None,
     }
 
 
@@ -118,6 +121,7 @@ async def test_fx_service_lists_track_fx() -> None:
     assert result["fx_count"] == 1
     assert result["fx"][0]["name"] == "VST: ReaEQ"
     assert result["fx"][0]["identity"] == "{TRACK-GUID}:0:{FX-GUID}"
+    assert result["fx"][0]["fx_identity"] == fx_identity()
 
 
 async def test_fx_service_lists_available_fx() -> None:
@@ -193,6 +197,7 @@ async def test_fx_service_adds_fx_with_undo_options() -> None:
         undo_label="Add FX: VST: ReaEQ",
     )
     assert result["added_fx"]["identity"] == "{TRACK-GUID}:0:{FX-GUID}"
+    assert result["added_fx"]["fx_identity"] == fx_identity()
 
 
 async def test_fx_service_adds_take_fx_with_typed_identity() -> None:
@@ -222,6 +227,12 @@ async def test_fx_service_adds_take_fx_with_typed_identity() -> None:
         undo_label="Add take FX: VST: ReaEQ",
     )
     assert result["added_fx"]["identity"] == "{TAKE-GUID}:0:{FX-GUID}"
+    assert result["added_fx"]["fx_identity"] == {
+        "take_guid": "{TAKE-GUID}",
+        "index": 0,
+        "expected_name": "VST: ReaEQ",
+        "expected_guid": "{FX-GUID}",
+    }
 
 
 async def test_fx_service_removes_fx_with_identity_guard() -> None:
@@ -303,6 +314,32 @@ async def test_fx_service_gets_fx_parameters_with_identity_guard() -> None:
     assert result["ok"] is True
     assert result["parameter_count"] == 1
     assert result["parameters"][0] == fx_parameter_payload()
+
+
+async def test_fx_service_preserves_plugin_defined_output_parameter_values() -> None:
+    note_mask = fx_parameter_payload(
+        index=21,
+        name="Note Mask",
+        normalized_value=1387.0,
+        formatted_value="1387",
+    )
+    bridge = FakeBridgeClient(
+        BridgeResponse(
+            id="request-1",
+            ok=True,
+            result={
+                "fx_identity": fx_identity(),
+                "parameter_count": 1,
+                "parameters": [note_mask],
+            },
+        )
+    )
+    service = FxService(bridge)
+
+    result = await service.get_fx_parameters(fx_identity=fx_identity())
+
+    assert result["ok"] is True
+    assert result["parameters"][0]["normalized_value"] == 1387.0
 
 
 async def test_fx_service_sets_fx_parameter_with_identity_guard_and_undo() -> None:

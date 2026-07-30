@@ -8,6 +8,8 @@ from reaper_mcp.bridge.base import BridgeClient
 from reaper_mcp.errors import ErrorCode
 from reaper_mcp.models.bridge import BridgeResponse, CommandOptions, ErrorResponse
 from reaper_mcp.models.routing import (
+    ConfigureReferenceTrackRequest,
+    ConfigureReferenceTrackResult,
     CreateTrackSendRequest,
     CreateTrackSendResult,
     RemoveTrackSendRequest,
@@ -213,6 +215,44 @@ class RoutingService:
             "warnings": response.warnings,
         }
 
+    async def configure_reference_track(
+        self,
+        track_guid: str,
+        hardware_output_pair: int = 1,
+        volume: float = 1.0,
+        pan: float = 0.0,
+    ) -> dict[str, Any]:
+        """Route a reference track directly to hardware around master FX."""
+
+        try:
+            request = ConfigureReferenceTrackRequest(
+                track_guid=track_guid,
+                hardware_output_pair=hardware_output_pair,
+                volume=volume,
+                pan=pan,
+            )
+        except ValidationError as exc:
+            return self._validation_error_result(exc)
+        response = await self.bridge_client.execute(
+            "configure_reference_track",
+            args=request.model_dump(mode="json"),
+            options=CommandOptions(
+                mutates_project=True,
+                undo_label="Configure reference track routing",
+            ),
+        )
+        if not response.ok:
+            return self._error_result(response)
+        try:
+            result = ConfigureReferenceTrackResult.model_validate(response.result or {})
+        except ValidationError as exc:
+            return self._invalid_payload_result(response, exc)
+        return {
+            "ok": True,
+            **result.model_dump(mode="json"),
+            "warnings": response.warnings,
+        }
+
     def _error_result(self, response: BridgeResponse) -> dict[str, Any]:
         return {
             "ok": False,
@@ -230,10 +270,12 @@ class RoutingService:
             "ok": False,
             "error": ErrorResponse(
                 code=ErrorCode.INVALID_SEND_REQUEST,
-                message="The track send request is invalid.",
+                message="The routing request is invalid.",
                 details=details,
                 recoverable=True,
-                suggested_action="Check track GUIDs, send index, volume, and pan.",
+                suggested_action=(
+                    "Check track GUIDs, send index, output pair, volume, and pan."
+                ),
             ).model_dump(mode="json"),
             "warnings": [],
         }

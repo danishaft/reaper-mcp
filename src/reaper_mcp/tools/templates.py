@@ -1,8 +1,9 @@
 """MCP track-template tool registration."""
 
-from typing import Any
+from typing import Annotated, Any
 
 from mcp.server.fastmcp import FastMCP
+from pydantic import Field
 
 from reaper_mcp.services.template_service import TemplateService
 
@@ -36,7 +37,13 @@ def register_template_tools(server: FastMCP, service: TemplateService) -> None:
 
     @server.tool(
         name="delete_track_template",
-        description="Delete one approved track-template file.",
+        description=(
+            "Delete one approved track-template file when its listed SHA-256 "
+            "still matches."
+        ),
     )
-    async def delete_track_template(template_path: str) -> dict[str, Any]:
-        return await service.delete_template(template_path)
+    async def delete_track_template(
+        template_path: str,
+        expected_sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")],
+    ) -> dict[str, Any]:
+        return await service.delete_template(template_path, expected_sha256)

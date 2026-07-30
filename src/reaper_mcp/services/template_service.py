@@ -1,5 +1,6 @@
 """Track-template service."""
 
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -35,8 +36,20 @@ class TemplateService:
         for root in self.allowed_template_roots:
             if not root.is_dir():
                 continue
-            for path in sorted(root.glob("*.RTrackTemplate")):
-                templates.append(TrackTemplateSnapshot(name=path.stem, path=path))
+            for candidate in sorted(root.glob("*.RTrackTemplate")):
+                path = candidate.resolve(strict=False)
+                if not path.is_relative_to(root) or not path.is_file():
+                    continue
+                try:
+                    templates.append(
+                        TrackTemplateSnapshot(
+                            name=path.stem,
+                            path=path,
+                            sha256=self._file_sha256(path),
+                        )
+                    )
+                except OSError:
+                    continue
         result = TrackTemplateList(templates=templates, template_count=len(templates))
         return {
             "ok": True,
@@ -84,8 +97,10 @@ class TemplateService:
         )
         return self._mutation_response(response)
 
-    async def delete_template(self, template_path: str) -> dict[str, Any]:
-        """Delete one approved track template file."""
+    async def delete_template(
+        self, template_path: str, expected_sha256: str
+    ) -> dict[str, Any]:
+        """Delete one approved track template when its content still matches."""
 
         path_result = self._validate_path(template_path)
         if path_result is not None:
@@ -93,8 +108,33 @@ class TemplateService:
         path = Path(template_path).expanduser().resolve(strict=False)
         if not path.is_file():
             return self._path_error(path, "Track template file does not exist.")
+        actual_sha256 = self._file_sha256(path)
+        if actual_sha256 != expected_sha256:
+            return {
+                "ok": False,
+                "error": ErrorResponse(
+                    code=ErrorCode.TEMPLATE_CONFLICT,
+                    message="The track template changed after it was listed.",
+                    details={
+                        "template_path": str(path),
+                        "expected_sha256": expected_sha256,
+                        "actual_sha256": actual_sha256,
+                    },
+                    recoverable=True,
+                    suggested_action=(
+                        "List track templates again and confirm the current SHA-256 "
+                        "before retrying deletion."
+                    ),
+                ).model_dump(mode="json"),
+                "warnings": [],
+            }
         path.unlink()
-        return {"ok": True, "deleted_template_path": str(path), "warnings": []}
+        return {
+            "ok": True,
+            "deleted_template_path": str(path),
+            "deleted_sha256": actual_sha256,
+            "warnings": [],
+        }
 
     def _validate_path(self, template_path: str) -> dict[str, Any] | None:
         path = Path(template_path).expanduser().resolve(strict=False)
@@ -158,3 +198,11 @@ class TemplateService:
             },
             "warnings": [],
         }
+
+    @staticmethod
+    def _file_sha256(path: Path) -> str:
+        digest = sha256()
+        with path.open("rb") as template_file:
+            for chunk in iter(lambda: template_file.read(64 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()

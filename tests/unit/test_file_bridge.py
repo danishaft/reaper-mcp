@@ -9,6 +9,7 @@ import pytest
 
 from reaper_mcp.bridge.file_bridge import FileBridgeClient
 from reaper_mcp.errors import ErrorCode
+from reaper_mcp.models.bridge import CommandOptions
 
 
 def make_client(tmp_path: Path, timeout_seconds: float = 1.0) -> FileBridgeClient:
@@ -117,6 +118,24 @@ async def test_file_bridge_times_out_with_structured_error(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
+async def test_file_bridge_marks_mutation_timeout_as_outcome_uncertain(
+    tmp_path: Path,
+) -> None:
+    client = make_client(tmp_path, timeout_seconds=0.02)
+
+    response = await client.execute(
+        "rename_track",
+        {"track_guid": "{TRACK-1}", "name": "Lead"},
+        CommandOptions(mutates_project=True, undo_label="Rename track"),
+    )
+
+    assert response.ok is False
+    assert response.error is not None
+    assert response.error.code == ErrorCode.OUTCOME_UNCERTAIN
+    assert "Refresh" in (response.error.suggested_action or "")
+
+
+@pytest.mark.asyncio
 async def test_file_bridge_logs_timeout_result(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
@@ -165,6 +184,33 @@ async def test_file_bridge_parses_invalid_envelope_error(tmp_path: Path) -> None
     assert response.error is not None
     assert response.error.code == ErrorCode.INVALID_COMMAND_ENVELOPE
     assert response.error.recoverable is False
+
+
+@pytest.mark.asyncio
+async def test_file_bridge_rejects_response_with_mismatched_id(tmp_path: Path) -> None:
+    client = make_client(tmp_path)
+    task = asyncio.create_task(client.execute("health_check"))
+    request_path = await wait_for_request(tmp_path)
+    payload = json.loads(request_path.read_text(encoding="utf-8"))
+    response_path = tmp_path / "responses" / f"{payload['id']}.json"
+    response_path.write_text(
+        json.dumps(
+            {
+                "id": "different-request",
+                "ok": True,
+                "result": {"status": "ok"},
+                "warnings": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = await task
+
+    assert response.ok is False
+    assert response.error is not None
+    assert response.error.code == ErrorCode.INVALID_BRIDGE_RESPONSE
+    assert "does not match" in response.error.details["error"]
 
 
 @pytest.mark.asyncio
