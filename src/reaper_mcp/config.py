@@ -23,9 +23,7 @@ class Settings(BaseSettings):
     transport: Literal["stdio", "http"] = "stdio"
     http_host: str = "127.0.0.1"
     http_port: int = Field(default=8765, ge=1, le=65535)
-    tool_profile: Literal["minimal", "production", "midi", "mixing", "full"] = (
-        "production"
-    )
+    tool_profile: Literal["minimal", "production", "midi", "mixing", "full"] = "minimal"
     render_timeout_seconds: float = 60.0
     render_poll_interval_seconds: float = 0.1
     render_background_confirmed: bool = False
@@ -36,6 +34,11 @@ class Settings(BaseSettings):
     allowed_render_roots: list[Path] = Field(default_factory=list)
     allowed_template_roots: list[Path] = Field(default_factory=list)
     allowed_audio_roots: list[Path] = Field(default_factory=list)
+    ffmpeg_executable: str = "ffmpeg"
+    audio_measurement_timeout_seconds: float = Field(default=120.0, gt=0.0)
+    audio_measurement_max_output_bytes: int = Field(
+        default=8 * 1024 * 1024, ge=64 * 1024
+    )
 
 
 def get_settings() -> Settings:

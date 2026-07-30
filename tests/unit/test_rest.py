@@ -23,7 +23,7 @@ async def test_rest_root_and_tool_discovery(rest_app) -> None:
     assert root_response.status_code == 200
     assert root_response.json()["transport"] == "http"
     assert tools_response.status_code == 200
-    assert tools_response.json()["count"] == 142
+    assert tools_response.json()["count"] == 26
     assert any(
         tool["name"] == "get_project_snapshot"
         for tool in tools_response.json()["tools"]
@@ -36,7 +36,7 @@ async def test_rest_calls_existing_mcp_tool(rest_app) -> None:
         response = await client.post("/api/tools/get_active_profile", json={})
 
     assert response.status_code == 200
-    assert response.json()["active_profile"] == "production"
+    assert response.json()["active_profile"] == "minimal"
 
 
 async def test_rest_rejects_invalid_arguments(rest_app) -> None:

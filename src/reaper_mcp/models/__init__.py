@@ -118,8 +118,11 @@ from reaper_mcp.models.render import (
     RenderTransaction,
 )
 from reaper_mcp.models.routing import (
+    ConfigureReferenceTrackRequest,
+    ConfigureReferenceTrackResult,
     CreateTrackSendRequest,
     CreateTrackSendResult,
+    HardwareOutputSnapshot,
     RemoveTrackSendRequest,
     RemoveTrackSendResult,
     SetTrackSendRequest,
@@ -139,6 +142,25 @@ from reaper_mcp.models.tempo import (
     TimeSignatureState,
 )
 from reaper_mcp.models.transport import TransportActionResult, TransportState
+from reaper_mcp.models.vocal_tuning import (
+    AppliedPitchCorrectionSegment,
+    PitchCorrectionSegment,
+    PreviewVocalTuningPlanRequest,
+    PreviewVocalTuningPluginPlanRequest,
+    PreviewVocalTuningPresetPlanRequest,
+    VocalTuningContext,
+    VocalTuningParameterState,
+    VocalTuningPlan,
+    VocalTuningPlanApplication,
+    VocalTuningPluginContext,
+    VocalTuningPluginPlan,
+    VocalTuningPluginPlanApplication,
+    VocalTuningPresetContext,
+    VocalTuningPresetPlan,
+    VocalTuningPresetPlanApplication,
+    VocalTuningProviderCapability,
+    X42AutoTuneSettings,
+)
 from reaper_mcp.models.workflow import (
     CreateMidiPatternRequest,
     CreateMidiPatternResult,
@@ -151,6 +173,7 @@ from reaper_mcp.models.workflow import (
 )
 
 __all__ = [
+    "AppliedPitchCorrectionSegment",
     "AddMidiNoteRequest",
     "AddMidiNoteResult",
     "AddMidiNotesRequest",
@@ -164,6 +187,8 @@ __all__ = [
     "BridgeResponse",
     "CommandEnvelope",
     "CommandOptions",
+    "ConfigureReferenceTrackRequest",
+    "ConfigureReferenceTrackResult",
     "CreateMarkerRequest",
     "CreateMarkerResult",
     "ErrorResponse",
@@ -172,6 +197,7 @@ __all__ = [
     "FxParameterSnapshot",
     "FxSnapshot",
     "GetFxParametersRequest",
+    "HardwareOutputSnapshot",
     "CreateMidiItemRequest",
     "CreateMidiItemResult",
     "CreateTrackSendRequest",
@@ -210,6 +236,10 @@ __all__ = [
     "MusicalPosition",
     "MoveMediaItemRequest",
     "PositionConversion",
+    "PitchCorrectionSegment",
+    "PreviewVocalTuningPlanRequest",
+    "PreviewVocalTuningPluginPlanRequest",
+    "PreviewVocalTuningPresetPlanRequest",
     "ProjectSnapshot",
     "MasterTrackMutationResult",
     "MasterTrackSnapshot",
@@ -282,4 +312,16 @@ __all__ = [
     "TransportState",
     "UpdateMidiNoteRequest",
     "UpdateMidiNoteResult",
+    "VocalTuningContext",
+    "VocalTuningParameterState",
+    "VocalTuningPlan",
+    "VocalTuningPlanApplication",
+    "VocalTuningPluginContext",
+    "VocalTuningPluginPlan",
+    "VocalTuningPluginPlanApplication",
+    "VocalTuningPresetContext",
+    "VocalTuningPresetPlan",
+    "VocalTuningPresetPlanApplication",
+    "VocalTuningProviderCapability",
+    "X42AutoTuneSettings",
 ]

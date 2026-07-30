@@ -17,7 +17,7 @@ def test_cli_lists_all_visible_tools(monkeypatch, tmp_path: Path, capsys) -> Non
     payload = json.loads(capsys.readouterr().out)
 
     assert exit_code == 0
-    assert payload["count"] == 142
+    assert payload["count"] == 26
     assert any(tool["name"] == "render_project" for tool in payload["tools"]) is False
 
 
@@ -30,7 +30,7 @@ def test_cli_calls_existing_tool_with_pretty_output(
     output = capsys.readouterr().out
 
     assert exit_code == 0
-    assert json.loads(output)["active_profile"] == "production"
+    assert json.loads(output)["active_profile"] == "minimal"
     assert '\n  "active_profile"' in output
 
 
@@ -43,7 +43,7 @@ def test_cli_profile_override_exposes_full_surface(
     payload = json.loads(capsys.readouterr().out)
 
     assert exit_code == 0
-    assert payload["count"] == 146
+    assert payload["count"] == 170
 
 
 def test_cli_reports_invalid_json(monkeypatch, tmp_path: Path, capsys) -> None:

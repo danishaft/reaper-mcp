@@ -55,6 +55,7 @@ CAPABILITY_TOOLS: dict[str, frozenset[str]] = {
             "create_midi_item",
             "insert_audio_item",
             "move_media_item",
+            "move_media_item_to_track",
             "resize_media_item",
             "duplicate_media_item",
             "split_media_item",
@@ -184,6 +185,7 @@ CAPABILITY_TOOLS: dict[str, frozenset[str]] = {
             "set_track_send",
             "remove_track_send",
             "setup_sidechain",
+            "configure_reference_track",
         }
     ),
     "workflows": frozenset({"create_song_starter", "create_midi_pattern"}),
@@ -196,7 +198,42 @@ CAPABILITY_TOOLS: dict[str, frozenset[str]] = {
         }
     ),
     "batch": frozenset({"batch_update_tracks"}),
-    "analysis": frozenset({"analyze_audio_file", "calculate_take_loudness"}),
+    "analysis": frozenset(
+        {
+            "analyze_audio_file",
+            "analyze_audio_program",
+            "calculate_take_loudness",
+            "measure_audio_file",
+        }
+    ),
+    "vocal_tuning": frozenset(
+        {
+            "list_vocal_tuning_providers",
+            "preview_vocal_tuning_plan",
+            "apply_vocal_tuning_plan",
+            "preview_vocal_tuning_preset_plan",
+            "apply_vocal_tuning_preset_plan",
+            "preview_vocal_tuning_plugin_plan",
+            "apply_vocal_tuning_plugin_plan",
+        }
+    ),
+    "mastering": frozenset(
+        {
+            "apply_mastering_plan",
+            "approve_mastering_album",
+            "approve_mastering_candidate",
+            "compare_mastering_candidates",
+            "create_mastering_candidate",
+            "create_mastering_codec_preview",
+            "create_mastering_session",
+            "create_mastering_version_set",
+            "create_stereo_mastering_project",
+            "deliver_mastering_candidate",
+            "prepare_mastering_audition",
+            "prepare_mastering_album",
+            "preview_mastering_plan",
+        }
+    ),
     "rendering": frozenset(
         {
             "render_project",
@@ -207,7 +244,11 @@ CAPABILITY_TOOLS: dict[str, frozenset[str]] = {
     ),
 }
 
-STABLE_CAPABILITIES = frozenset(CAPABILITY_TOOLS) - {"rendering"}
+STABLE_CAPABILITIES = frozenset(CAPABILITY_TOOLS) - {
+    "mastering",
+    "rendering",
+    "vocal_tuning",
+}
 PROFILE_CAPABILITIES: dict[ToolProfile, frozenset[str]] = {
     "minimal": frozenset({"core", "navigation"}),
     "production": STABLE_CAPABILITIES,
@@ -241,6 +282,7 @@ PROFILE_CAPABILITIES: dict[ToolProfile, frozenset[str]] = {
             "navigation",
             "routing",
             "analysis",
+            "vocal_tuning",
         }
     ),
     "full": frozenset(CAPABILITY_TOOLS),
