@@ -11,7 +11,9 @@ from importlib.resources import files
 from pathlib import Path
 
 BRIDGE_FILENAME = "reaper_mcp_bridge.lua"
+BRIDGE_MODULE_DIRNAME = "reaper_mcp_bridge_modules"
 PACKAGED_BRIDGE = ("resources", BRIDGE_FILENAME)
+PACKAGED_BRIDGE_MODULES = ("resources", BRIDGE_MODULE_DIRNAME)
 
 
 @dataclass(frozen=True)
@@ -21,6 +23,8 @@ class BridgeInstallResult:
     resource_path: Path
     target_path: Path
     backup_path: Path | None
+    module_paths: tuple[Path, ...]
+    module_backup_paths: tuple[Path, ...]
     changed: bool
 
 
@@ -64,6 +68,56 @@ def load_bridge_source(source_path: Path | None = None) -> bytes:
     raise FileNotFoundError("The packaged REAPER Lua bridge could not be found.")
 
 
+def load_bridge_module_sources(
+    source_path: Path | None = None,
+) -> dict[str, bytes]:
+    """Load optional Lua command modules beside the selected bridge."""
+
+    if source_path is not None:
+        module_dir = source_path.expanduser().resolve().parent / BRIDGE_MODULE_DIRNAME
+        if not module_dir.is_dir():
+            return {}
+        return {
+            path.name: path.read_bytes()
+            for path in sorted(module_dir.glob("*.lua"))
+            if path.is_file()
+        }
+
+    packaged = files("reaper_mcp").joinpath(*PACKAGED_BRIDGE_MODULES)
+    if packaged.is_dir():
+        return {
+            entry.name: entry.read_bytes()
+            for entry in sorted(packaged.iterdir(), key=lambda item: item.name)
+            if entry.is_file() and entry.name.endswith(".lua")
+        }
+
+    checkout_dir = Path(__file__).resolve().parents[2] / "lua" / BRIDGE_MODULE_DIRNAME
+    if checkout_dir.is_dir():
+        return {
+            path.name: path.read_bytes()
+            for path in sorted(checkout_dir.glob("*.lua"))
+            if path.is_file()
+        }
+    return {}
+
+
+def _install_file(target_path: Path, content: bytes) -> tuple[bool, Path | None]:
+    """Atomically install one bridge file and back up changed content."""
+
+    if target_path.is_file() and target_path.read_bytes() == content:
+        return False, None
+    backup_path = None
+    if target_path.exists():
+        if not target_path.is_file():
+            raise IsADirectoryError(f"Bridge target is not a file: {target_path}")
+        backup_path = target_path.with_suffix(f"{target_path.suffix}.backup")
+        backup_path.write_bytes(target_path.read_bytes())
+    temporary_path = target_path.with_suffix(f"{target_path.suffix}.tmp")
+    temporary_path.write_bytes(content)
+    temporary_path.replace(target_path)
+    return True, backup_path
+
+
 def install_bridge(
     resource_path: Path | None = None,
     *,
@@ -80,33 +134,37 @@ def install_bridge(
         )
 
     bridge_source = load_bridge_source(source_path)
+    module_sources = load_bridge_module_sources(source_path)
     scripts_path = resolved_resource_path / "Scripts"
     scripts_path.mkdir(exist_ok=True)
     target_path = scripts_path / BRIDGE_FILENAME
+    bridge_changed, backup_path = _install_file(target_path, bridge_source)
 
-    if target_path.is_file() and target_path.read_bytes() == bridge_source:
-        return BridgeInstallResult(
-            resource_path=resolved_resource_path,
-            target_path=target_path,
-            backup_path=None,
-            changed=False,
-        )
+    module_paths: list[Path] = []
+    module_backup_paths: list[Path] = []
+    modules_changed = False
+    if module_sources:
+        module_dir = scripts_path / BRIDGE_MODULE_DIRNAME
+        if module_dir.exists() and not module_dir.is_dir():
+            raise NotADirectoryError(
+                f"Bridge module target is not a directory: {module_dir}"
+            )
+        module_dir.mkdir(exist_ok=True)
+        for filename, content in module_sources.items():
+            module_path = module_dir / filename
+            changed, module_backup_path = _install_file(module_path, content)
+            modules_changed = modules_changed or changed
+            module_paths.append(module_path)
+            if module_backup_path is not None:
+                module_backup_paths.append(module_backup_path)
 
-    backup_path = None
-    if target_path.exists():
-        if not target_path.is_file():
-            raise IsADirectoryError(f"Bridge target is not a file: {target_path}")
-        backup_path = target_path.with_suffix(f"{target_path.suffix}.backup")
-        backup_path.write_bytes(target_path.read_bytes())
-
-    temporary_path = target_path.with_suffix(f"{target_path.suffix}.tmp")
-    temporary_path.write_bytes(bridge_source)
-    temporary_path.replace(target_path)
     return BridgeInstallResult(
         resource_path=resolved_resource_path,
         target_path=target_path,
         backup_path=backup_path,
-        changed=True,
+        module_paths=tuple(module_paths),
+        module_backup_paths=tuple(module_backup_paths),
+        changed=bridge_changed or modules_changed,
     )
 
 
@@ -142,8 +200,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if result.changed:
         print(f"Installed REAPER MCP bridge: {result.target_path}")
+        if result.module_paths:
+            print(f"Installed {len(result.module_paths)} Lua command modules.")
         if result.backup_path:
             print(f"Backed up previous bridge: {result.backup_path}")
+        for backup_path in result.module_backup_paths:
+            print(f"Backed up previous bridge module: {backup_path}")
     else:
         print(f"REAPER MCP bridge is already current: {result.target_path}")
     print("In REAPER, add the installed script from Actions > New action > Load.")

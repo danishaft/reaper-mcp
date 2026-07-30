@@ -35,6 +35,7 @@ packages = ["src/reaper_mcp"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "lua/reaper_mcp_bridge.lua" = "reaper_mcp/resources/reaper_mcp_bridge.lua"
+"lua/reaper_mcp_bridge_modules" = "reaper_mcp/resources/reaper_mcp_bridge_modules"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
+import struct
 import time
 import wave
 from pathlib import Path
@@ -16,12 +18,16 @@ import pytest
 from reaper_mcp.bridge.file_bridge import FileBridgeClient
 from reaper_mcp.services.arrangement_service import ArrangementService
 from reaper_mcp.services.audio_analysis_service import AudioAnalysisService
+from reaper_mcp.services.audio_measurement_backend import FfmpegEbur128Backend
+from reaper_mcp.services.audio_measurement_service import AudioMeasurementService
 from reaper_mcp.services.automation_service import AutomationService
 from reaper_mcp.services.batch_service import BatchService
 from reaper_mcp.services.diagnostics_service import DiagnosticsService
 from reaper_mcp.services.freeze_service import FreezeService
 from reaper_mcp.services.fx_service import FxService
 from reaper_mcp.services.health_service import HealthService
+from reaper_mcp.services.mastering_plan_service import MasteringPlanService
+from reaper_mcp.services.mastering_session_service import MasteringSessionService
 from reaper_mcp.services.media_service import MediaService
 from reaper_mcp.services.midi_controller_service import MidiControllerService
 from reaper_mcp.services.midi_transform_service import MidiTransformService
@@ -34,6 +40,7 @@ from reaper_mcp.services.template_service import TemplateService
 from reaper_mcp.services.tempo_map_service import TempoMapService
 from reaper_mcp.services.tempo_service import TempoService
 from reaper_mcp.services.transport_service import TransportService
+from reaper_mcp.services.vocal_tuning_service import VocalTuningService
 from reaper_mcp.services.workflow_service import WorkflowService
 
 LIVE_TEST_ENABLED = os.getenv("REAPER_MCP_LIVE_TEST") == "1"
@@ -134,6 +141,91 @@ def _write_test_wav(path: Path) -> None:
         output.setsampwidth(2)
         output.setframerate(44_100)
         output.writeframes(b"\0\0" * 4_410)
+
+
+@pytest.mark.asyncio
+async def test_reaper_vocal_tuning_split_pitch_and_undo(tmp_path: Path) -> None:
+    """Verify approved segment tuning, observed pitch, and one-step undo."""
+
+    bridge_dir = Path(os.environ["REAPER_MCP_BRIDGE_DIR"])
+    bridge = _bridge_client(bridge_dir)
+    project = ProjectService(bridge)
+    media = MediaService(bridge, allowed_media_source_roots=[tmp_path])
+    takes = TakeService(bridge)
+    tuning = VocalTuningService(
+        bridge,
+        project,
+        media,
+        takes,
+        FxService(bridge),
+    )
+
+    source_path = tmp_path / "vocal.wav"
+    _write_test_wav(source_path)
+    created_track = await project.create_track(name="Tuning Acceptance")
+    assert created_track["ok"] is True
+    track_guid = created_track["track"]["guid"]
+    inserted = await media.insert_audio_item(track_guid, str(source_path))
+    assert inserted["ok"] is True
+    item = inserted["item"]
+    item_guid = item["guid"]
+    take_guid = item["active_take"]["guid"]
+    start_seconds = item["position_seconds"] + 0.02
+    end_seconds = item["position_seconds"] + 0.06
+
+    preview = await tuning.preview_plan(
+        "reaper_take_pitch",
+        "transparent_repair",
+        track_guid,
+        item_guid,
+        take_guid,
+        [
+            {
+                "segment_id": "acceptance-note",
+                "start_seconds": start_seconds,
+                "end_seconds": end_seconds,
+                "correction_cents": -25.0,
+                "preserve_vibrato": True,
+                "rationale": "Verify the stable take-pitch provider",
+            }
+        ],
+    )
+    assert preview["ok"] is True
+    applied = await tuning.apply_plan(
+        preview["plan"],
+        preview["plan"]["approval_hash"],
+    )
+    assert applied["ok"] is True
+    assert applied["application"]["applied_correction_count"] == 1
+    assert applied["application"]["segments"][0]["result_pitch_semitones"] == (
+        pytest.approx(-0.25)
+    )
+    assert _run_probe(bridge_dir)["undo_label"] == ("Apply approved vocal tuning plan")
+    assert (await media.list_media_items())["item_count"] == 3
+
+    _run_probe(bridge_dir, "undo")
+    restored = await media.list_media_items()
+    assert restored["item_count"] == 1
+    restored_takes = await takes.list_item_takes(restored["items"][0]["guid"])
+    assert restored_takes["takes"][0]["pitch_semitones"] == pytest.approx(0.0)
+
+
+def _write_mastering_test_wav(path: Path) -> None:
+    sample_rate = 48_000
+    with wave.open(str(path), "wb") as output:
+        output.setnchannels(2)
+        output.setsampwidth(2)
+        output.setframerate(sample_rate)
+        output.writeframes(
+            b"".join(
+                struct.pack(
+                    "<hh",
+                    round(math.sin(2 * math.pi * 997 * frame / sample_rate) * 8192),
+                    round(math.sin(2 * math.pi * 997 * frame / sample_rate) * 8192),
+                )
+                for frame in range(sample_rate * 4)
+            )
+        )
 
 
 async def _send_raw_envelope(
@@ -357,6 +449,9 @@ async def test_reaper_media_and_midi_acceptance() -> None:
     created_track = await project.create_track(name="Media Acceptance")
     assert created_track["ok"] is True
     track_guid = created_track["track"]["guid"]
+    destination_track = await project.create_track(name="Media Destination")
+    assert destination_track["ok"] is True
+    destination_track_guid = destination_track["track"]["guid"]
     assert (await media.list_media_items())["item_count"] == 0
 
     created_item = await media.create_midi_item(
@@ -645,6 +740,42 @@ async def test_reaper_media_and_midi_acceptance() -> None:
     assert original_audio["start_qn"] == pytest.approx(4.0)
     _run_probe(bridge_dir, "redo")
 
+    moved_to_track = await media.move_media_item_to_track(
+        audio_item_guid,
+        destination_track_guid,
+        track_guid,
+    )
+    assert moved_to_track["ok"] is True
+    assert moved_to_track["item"]["track_guid"] == destination_track_guid
+    assert moved_to_track["item"]["start_qn"] == pytest.approx(8.0)
+    assert moved_to_track["position_preserved"] is True
+    assert moved_to_track["take_offsets_preserved"] is True
+    assert _run_probe(bridge_dir)["undo_label"] == "Move media item to track"
+    _run_probe(bridge_dir, "undo")
+    restored_audio = next(
+        item
+        for item in (await media.list_media_items())["items"]
+        if item["guid"] == audio_item_guid
+    )
+    assert restored_audio["track_guid"] == track_guid
+    _run_probe(bridge_dir, "redo")
+
+    stale_source = await media.move_media_item_to_track(
+        audio_item_guid,
+        destination_track_guid,
+        track_guid,
+    )
+    assert stale_source["ok"] is False
+    assert stale_source["error"]["code"] == "invalid_media_item_request"
+
+    moved_back = await media.move_media_item_to_track(
+        audio_item_guid,
+        track_guid,
+        destination_track_guid,
+    )
+    assert moved_back["ok"] is True
+    assert moved_back["item"]["track_guid"] == track_guid
+
     resized = await media.resize_media_item(audio_item_guid, length_beats=2.0)
     assert resized["ok"] is True
     assert resized["item"]["end_qn"] - resized["item"]["start_qn"] == pytest.approx(2.0)
@@ -733,6 +864,7 @@ async def test_reaper_media_and_midi_acceptance() -> None:
     _run_probe(bridge_dir, "redo")
 
     assert (await project.delete_track(track_guid))["ok"] is True
+    assert (await project.delete_track(destination_track_guid))["ok"] is True
     audio_path.unlink()
 
 
@@ -806,8 +938,20 @@ async def test_reaper_track_routing_acceptance() -> None:
     assert (await routing.list_track_sends(source_guid))["send_count"] == 1
     _run_probe(bridge_dir, "redo")
 
+    reference = await project.create_track(name="Reference Routing")
+    reference_guid = reference["track"]["guid"]
+    configured = await routing.configure_reference_track(reference_guid)
+    assert configured["ok"] is True
+    assert configured["master_send_enabled"] is False
+    assert configured["hardware_output"]["destination_channels"] == "1/2"
+    assert configured["hardware_send_created"] is True
+    assert _run_probe(bridge_dir)["undo_label"] == ("Configure reference track routing")
+    _run_probe(bridge_dir, "undo")
+    _run_probe(bridge_dir, "redo")
+
     assert (await project.delete_track(source_guid))["ok"] is True
     assert (await project.delete_track(destination_guid))["ok"] is True
+    assert (await project.delete_track(reference_guid))["ok"] is True
 
 
 @pytest.mark.asyncio
@@ -961,6 +1105,102 @@ async def test_reaper_fx_acceptance() -> None:
     _run_probe(bridge_dir, "redo")
     assert (await fx_service.list_track_fx(track_guid))["fx_count"] == 0
     assert (await project.delete_track(track_guid))["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_reaper_mastering_stock_fx_plan_acceptance() -> None:
+    """Verify stock master FX and an approved plan against live REAPER."""
+
+    bridge_dir = Path(os.environ["REAPER_MCP_BRIDGE_DIR"])
+    bridge = _bridge_client(bridge_dir)
+    project = ProjectService(bridge)
+    fx_service = FxService(bridge)
+    measurement_service = AudioMeasurementService(
+        FfmpegEbur128Backend(),
+        allowed_audio_roots=[bridge_dir],
+    )
+    session_service = MasteringSessionService(measurement_service, project)
+    plan_service = MasteringPlanService(bridge, fx_service, project)
+
+    master = (await project.get_master_track())["master_track"]
+    master_guid = master["guid"]
+    assert (await fx_service.list_track_fx(master_guid))["fx_count"] == 0
+
+    available = (await fx_service.list_available_fx())["fx"]
+    required_names = ("reaeq", "reacomp", "realimit")
+    stock_fx = [
+        next(item for item in available if name in item["name"].casefold())
+        for name in required_names
+    ]
+    for expected_count, item in enumerate(stock_fx, start=1):
+        added = await fx_service.add_fx(master_guid, item["identifier"])
+        assert added["ok"] is True
+        assert added["fx_count"] == expected_count
+        assert _run_probe(bridge_dir)["undo_label"] == (f"Add FX: {item['identifier']}")
+
+    chain = await fx_service.list_track_fx(master_guid)
+    assert chain["fx_count"] == 3
+    for required_name, fx in zip(required_names, chain["fx"], strict=True):
+        assert required_name in fx["name"].casefold()
+    for fx in chain["fx"]:
+        parameters = await fx_service.get_fx_parameters(_fx_identity(fx))
+        assert parameters["ok"] is True
+        assert parameters["parameter_count"] > 0
+
+    source_path = bridge_dir / "mastering-acceptance-source.wav"
+    _write_mastering_test_wav(source_path)
+    session_result = await session_service.create_session(
+        str(source_path),
+        "current_project",
+        "Verify a guarded stock-FX mastering plan.",
+        priorities=["Do not change the source file."],
+    )
+    assert session_result["ok"] is True
+
+    target_fx = chain["fx"][0]
+    target_identity = _fx_identity(target_fx)
+    target_parameter = (await fx_service.get_fx_parameters(target_identity))[
+        "parameters"
+    ][0]
+    original_value = target_parameter["normalized_value"]
+    target_value = 0.25 if original_value > 0.5 else 0.75
+    preview = await plan_service.preview_plan(
+        session_result["session"],
+        master_guid,
+        [
+            {
+                "action": "set_parameter",
+                "fx_identity": target_identity,
+                "parameter_index": target_parameter["index"],
+                "expected_parameter_name": target_parameter["name"],
+                "normalized_value": target_value,
+                "rationale": "Exercise the guarded mastering transaction.",
+                "expected_effect": "Only the selected normalized parameter changes.",
+            }
+        ],
+    )
+    assert preview["ok"] is True
+    applied = await plan_service.apply_plan(
+        preview["plan"],
+        preview["plan"]["approval_hash"],
+    )
+    assert applied["ok"] is True
+    assert applied["application"]["applied_operation_count"] == 1
+    assert _run_probe(bridge_dir)["undo_label"] == ("Apply approved mastering FX plan")
+
+    _run_probe(bridge_dir, "undo")
+    restored = await fx_service.get_fx_parameters(target_identity)
+    restored_parameter = next(
+        item
+        for item in restored["parameters"]
+        if item["index"] == target_parameter["index"]
+    )
+    assert restored_parameter["normalized_value"] == pytest.approx(original_value)
+
+    for fx in reversed((await fx_service.list_track_fx(master_guid))["fx"]):
+        assert (await fx_service.remove_fx(_fx_identity(fx)))["ok"] is True
+    assert (await fx_service.list_track_fx(master_guid))["fx_count"] == 0
+    source_path.unlink()
 
 
 @pytest.mark.asyncio
@@ -1367,7 +1607,15 @@ async def test_reaper_producer_expansion_acceptance(tmp_path: Path) -> None:
         source_guid,
         destination_guid,
     }
-    assert (await templates.delete_template(str(template_path)))["ok"] is True
+    listed_templates = await templates.list_templates()
+    template_sha256 = next(
+        template["sha256"]
+        for template in listed_templates["templates"]
+        if Path(template["path"]) == template_path
+    )
+    assert (await templates.delete_template(str(template_path), template_sha256))[
+        "ok"
+    ] is True
 
     assert (await project.delete_track(source_guid))["ok"] is True
     assert (await project.delete_track(destination_guid))["ok"] is True
