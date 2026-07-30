@@ -24,7 +24,7 @@
   <img src="https://img.shields.io/badge/Windows-CI%20tested-6f42c1.svg?style=flat-square" alt="Windows CI tested, REAPER unverified">
   <img src="https://img.shields.io/badge/MCP-stdio%20%7C%20REST-6f42c1.svg?style=flat-square" alt="MCP stdio and REST">
   <img src="https://img.shields.io/badge/CLI-supported-6f42c1.svg?style=flat-square" alt="CLI supported">
-  <img src="https://img.shields.io/badge/tools-146-6f42c1.svg?style=flat-square" alt="146 tools">
+  <img src="https://img.shields.io/badge/tools-170-6f42c1.svg?style=flat-square" alt="170 tools">
 </p>
 
 <p align="center">
@@ -49,15 +49,19 @@ approved ReaScript commands.
 | Producer workflow | Representative tools | What it enables |
 | --- | --- | --- |
 | **Build** | `create_song_starter`, `create_track`, `create_midi_pattern` | Start a song with tracks, MIDI parts, and a region |
-| **Arrange** | `move_media_item`, `split_media_item`, `create_marker`, `create_region` | Shape sections and place material on the timeline |
+| **Arrange** | `move_media_item`, `move_media_item_to_track`, `split_media_item`, `create_region` | Shape sections and compile scattered performances into role tracks |
 | **Edit MIDI** | `add_midi_notes`, `quantize_midi_notes`, `humanize_midi_notes`, `snap_midi_notes_to_scale` | Write, correct, and vary musical performances |
-| **Mix** | `set_track_volume`, `add_fx`, `set_fx_parameter`, `setup_sidechain` | Balance tracks and build guarded processing chains |
+| **Mix** | `set_track_volume`, `add_fx`, `setup_sidechain`, `configure_reference_track` | Balance tracks, build guarded processing chains, and audition references outside master FX |
+| **Tune vocals** | `list_vocal_tuning_providers`, `preview_vocal_tuning_plugin_plan`, `apply_vocal_tuning_plugin_plan` | Apply approved scale-aware pitch correction through a verified, undoable provider |
 | **Manage projects** | `save_project`, `apply_track_template`, `freeze_track`, `undo` | Save, template, freeze, and recover project changes |
-| **Analyze** | `get_project_snapshot`, `analyze_audio_file`, `calculate_take_loudness` | Inspect project structure and approved audio files |
+| **Analyze** | `measure_audio_file`, `analyze_audio_program` | Measure loudness, peaks, DC offset, frequency-band balance, and silence |
+| **Master** | `create_mastering_session`, `preview_mastering_plan`, `prepare_mastering_audition` | Guard master-FX plans, render measured candidates, and prepare level-matched A/B projects |
+| **Deliver** | `deliver_mastering_candidate`, `create_mastering_codec_preview`, `create_mastering_version_set`, `prepare_mastering_album` | Verify PCM WAVs, measure decoded AAC/MP3/Opus previews, group approved versions, and prepare albums |
 | **Render** | `render_project`, `render_project_start`, `render_project_result` | Produce approved WAV output with completion checks |
 
-The default `production` profile exposes 142 stable tools. The `full` profile
-exposes all 146 tools, including experimental render lifecycle operations.
+The default `minimal` profile exposes 26 focused tools. Opt into `production`
+for 146 stable tools or `full` for all 170 tools, including experimental vocal
+tuning, mastering, and render lifecycle operations.
 
 ## Interfaces
 
@@ -142,17 +146,28 @@ unverified platform as production-ready until REAPER has been exercised there.
 
 ## Available tool surface
 
-The server registers 146 tools and exposes 142 stable tools in the default
-`production` profile. Use discovery instead of memorizing the complete list.
+The server registers 170 tools and exposes 26 focused tools in the default
+`minimal` profile. Use discovery instead of memorizing the complete list.
 
 ```bash
 uv run reaper-mcp-cli tools --pretty
 uv run reaper-mcp-cli capabilities --pretty
 ```
 
-The `minimal`, `midi`, and `mixing` profiles reduce the visible surface for
-focused sessions. The `full` profile also exposes experimental render lifecycle
-operations.
+The `production`, `midi`, and `mixing` profiles provide larger task-specific
+surfaces. `mixing` includes experimental vocal tuning; `full` also exposes
+experimental mastering and render lifecycle operations. The tuning workflow
+executes supplied note-segment corrections through stable REAPER take-pitch
+controls. It can insert x42 Auto Tune first and directly set its documented
+root-scale note mask, correction, smoothing, bias, tuning, fast mode, and wet
+controls, or recall an engineer-authored ReaTune preset without editing hidden
+plugin state. It does not detect the song key or claim formant-safe correction.
+Mastering has local unit, FFmpeg, isolated-child REAPER, Linux
+stock master-FX coverage, and one complete Codex-to-MCP isolated mastering
+acceptance run. The official EBU v5.0 compliance run passes the selected Tech
+3341 loudness and true-peak cases. Retained engineer listening evidence,
+deterministic scoring of captured client traces, and macOS/Windows REAPER
+acceptance remain pending.
 
 ## MCP setup
 
@@ -177,8 +192,8 @@ Add the server to an MCP client that supports stdio transport:
 }
 ```
 
-The server exposes the `production` profile by default. Use the profile tools
-or set `REAPER_MCP_TOOL_PROFILE` to choose `minimal`, `midi`, `mixing`, or
+The server exposes the `minimal` profile by default. Use the profile tools or
+set `REAPER_MCP_TOOL_PROFILE` to choose `production`, `midi`, `mixing`, or
 `full`.
 
 ## CLI usage
@@ -241,11 +256,16 @@ The bridge and services enforce the following rules before REAPER executes a
 mutation:
 
 - Stable REAPER GUIDs identify tracks, items, takes, FX, envelopes, and sends.
+- Reference tracks can bypass master FX through a verified direct hardware
+  send created in one undoable routing operation.
 - Mutations are validated and wrapped in named REAPER undo actions.
 - Stale target fingerprints return structured conflicts instead of guessing.
 - Audio, project, template, analysis, and render paths use explicit allowlists.
+- Template deletion requires the SHA-256 returned by a fresh template listing.
 - Render success requires a stable, non-empty output and verified restoration.
 - Hidden profile tools cannot be called through stale client discovery.
+- A timed-out mutation reports an uncertain outcome and must be refreshed
+  before retrying.
 - Bridge failures report structured errors instead of claiming success.
 
 ## Configuration
@@ -261,8 +281,11 @@ Runtime settings use the `REAPER_MCP_` prefix. The important paths are:
 | `REAPER_MCP_ALLOWED_PROJECT_ROOTS` | Projects that may be saved as |
 | `REAPER_MCP_ALLOWED_RENDER_ROOTS` | Directories allowed for WAV output |
 | `REAPER_MCP_ALLOWED_TEMPLATE_ROOTS` | Directories allowed for templates |
-| `REAPER_MCP_ALLOWED_AUDIO_ROOTS` | WAV files allowed for analysis |
+| `REAPER_MCP_ALLOWED_AUDIO_ROOTS` | Audio files allowed for analysis |
 | `REAPER_MCP_REAPER_EXECUTABLE` | REAPER binary used by isolated rendering |
+| `REAPER_MCP_FFMPEG_EXECUTABLE` | FFmpeg binary used for EBU R128 measurement |
+| `REAPER_MCP_AUDIO_MEASUREMENT_TIMEOUT_SECONDS` | Per-file meter timeout |
+| `REAPER_MCP_AUDIO_MEASUREMENT_MAX_OUTPUT_BYTES` | Meter diagnostic output cap |
 
 All allowlists default to empty. See the [full configuration](#configuration)
 and [engineering standards](docs/reaper-mcp-engineering-standards.md) for the
@@ -295,8 +318,8 @@ editable
    resolves GUIDs against current project state, executes the ReaScript
    operation, and writes a structured response. Mutating commands run inside
    one REAPER undo block.
-6. Python normalizes the response or stable error, then returns it unchanged in
-   meaning through the selected interface.
+6. Python verifies the response request ID, normalizes the response or stable
+   error, then returns it unchanged in meaning through the selected interface.
 
 Synchronous commands use `requests/` and `responses/`. Long-running render
 operations use `jobs/`, so the client can start a job, inspect its status, and
@@ -324,7 +347,9 @@ integration tests provide the verification record.
 The current acceptance evidence covers the bridge, project and track
 operations, transport, media, MIDI, FX, routing, automation, takes,
 arrangement, tempo, templates, analysis, workflows, interfaces, and isolated
-project rendering on Linux with REAPER 7.66.
+project rendering on Linux with REAPER 7.66. A July 28 targeted run also covers
+stock ReaEQ, ReaComp, and ReaLimit on the master bus plus guarded mastering
+plan preview, apply, and undo.
 
 Run the local checks without REAPER:
 
@@ -338,10 +363,14 @@ Live acceptance is opt-in and requires an isolated REAPER instance with both
 the bridge and acceptance-probe Lua scripts running:
 
 ```bash
+mkdir -p .private
 REAPER_MCP_LIVE_TEST=1 \
 REAPER_MCP_BRIDGE_DIR=/tmp/reaper-mcp-bridge \
-uv run pytest tests/integration
+uv run pytest tests/integration \
+  --junitxml=.private/live-reaper-acceptance.xml
 ```
+
+The ignored JUnit XML file is a machine-readable local record of the live run.
 
 Known limitations are deliberate and documented:
 
@@ -350,6 +379,10 @@ Known limitations are deliberate and documented:
   block the Lua event loop. The isolated external render path is verified.
 - `set_fx_preset` remains unverified when the installed test FX exposes no
   preset.
+- Vocal tuning does not detect the song key. x42 Auto Tune has a verified
+  parameter contract on Linux but no formant correction; ReaTune requires an
+  engineer-authored named preset. The take-pitch bridge command still needs
+  live REAPER acceptance.
 - The Lua bridge must be running inside REAPER before a tool can execute.
 - Plugin UI automation, audio-rate control, and cloud collaboration are out
   of scope.
@@ -380,7 +413,15 @@ REAPER execution, tests, and release documentation.
 |   |-- models/               typed request and result schemas
 |   `-- bridge/               Python bridge transport
 |-- lua/
-|   `-- reaper_mcp_bridge.lua REAPER-side command dispatcher
+|   |-- reaper_mcp_bridge.lua REAPER-side dispatcher and runtime
+|   `-- reaper_mcp_bridge_modules/
+|       |-- automation_navigation.lua
+|       |-- command_execution.lua
+|       |-- fx_arrangement_tempo.lua
+|       |-- media_midi.lua
+|       |-- project_routing_transport.lua
+|       |-- render.lua
+|       `-- vocal_tuning.lua
 |-- tests/
 |   |-- unit/                 tests without REAPER
 |   `-- integration/          opt-in live REAPER acceptance

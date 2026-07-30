@@ -11,7 +11,7 @@ flowchart LR
         Adapters["Interface adapters<br/>FastMCP | CLI | REST"]
         Registry["ProfiledFastMCP registry<br/>Profiles and capability gates"]
         Tools["Thin tools<br/>Names, schemas, delegation"]
-        Services["Domain services<br/>Workflows and result mapping"]
+        Services["Domain services<br/>Workflows | provider registry | result mapping"]
         Policies["Typed models and safety policies<br/>Pydantic v2 | approved roots | GUID identity"]
         FileBridge["FileBridgeClient<br/>Atomic publish | poll | timeout | cleanup"]
     end
@@ -24,8 +24,9 @@ flowchart LR
     end
 
     subgraph REAPER["4. REAPER execution plane - DAW process boundary"]
-        Lua["Deferred Lua bridge<br/>Poll | validate | dispatch"]
-        Guard["Execution guard<br/>GUID resolution | preflight | undo"]
+        Lua["Deferred Lua dispatcher<br/>Bootstrap | module wiring | poll"]
+        Modules["Lua domain modules<br/>Project | FX | render | media/MIDI | automation | tuning"]
+        Guard["Command execution module<br/>GUID resolution | state preflight | undo and rollback"]
         API["ReaScript API<br/>Native project operations"]
         Project[("Active REAPER project<br/>Tracks | timeline | mix state")]
     end
@@ -51,10 +52,11 @@ flowchart LR
     Policies -->|"4. approved command"| FileBridge
     FileBridge -->|"5. atomic JSON"| Requests
     Requests -.->|"6. deferred poll"| Lua
-    Lua -->|"7. guarded execution"| Guard
+    Lua -->|"7. registered command"| Modules
+    Modules -->|"8. guarded execution"| Guard
     Guard --> API
     API --> Project
-    Lua -.->|"8. structured response"| Responses
+    Lua -.->|"9. structured response"| Responses
     Responses -.-> FileBridge
     Lua -.-> Jobs
     Lua -.-> Heartbeat
@@ -77,6 +79,6 @@ flowchart LR
     class Adapters,Registry,Tools,Services,FileBridge python
     class Policies safety
     class Requests,Responses,Jobs,Heartbeat ipc
-    class Lua,Guard,API,Project reaper
+    class Lua,Modules,Guard,API,Project reaper
     class Roots,Snapshot,Renderer render
     class WAV success

@@ -31,10 +31,14 @@ Live acceptance is opt-in. Start an isolated REAPER instance with the bridge
 and acceptance-probe scripts, then run:
 
 ```bash
+mkdir -p .private
 REAPER_MCP_LIVE_TEST=1 \
 REAPER_MCP_BRIDGE_DIR=/tmp/reaper-mcp-bridge \
-uv run pytest tests/integration
+uv run pytest tests/integration \
+  --junitxml=.private/live-reaper-acceptance.xml
 ```
+
+The ignored JUnit XML file provides machine-readable local acceptance evidence.
 
 ## Engineering expectations
 

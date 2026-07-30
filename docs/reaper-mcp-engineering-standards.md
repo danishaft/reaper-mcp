@@ -125,11 +125,31 @@ src/reaper_mcp/
     |-- base.py
     `-- file_bridge.py
 lua/
-`-- reaper_mcp_bridge.lua
+|-- reaper_mcp_bridge.lua
+`-- reaper_mcp_bridge_modules/
+    |-- automation_navigation.lua
+    |-- command_execution.lua
+    |-- fx_arrangement_tempo.lua
+    |-- media_midi.lua
+    |-- project_routing_transport.lua
+    |-- render.lua
+    `-- vocal_tuning.lua
 tests/
 |-- unit/
 `-- integration/
 ```
+
+The top-level Lua bridge owns bootstrap, the command envelope, shared REAPER
+identity helpers, module wiring, and request polling. Lua command modules own
+cohesive REAPER command families. `command_execution.lua` owns dispatch,
+preflight, undo handling, and structured command errors. `render.lua` owns the
+asynchronous render state machine. Modules receive explicit dependencies and
+are packaged and installed with the dispatcher.
+
+Do not create one Lua file per command. Extract a module only when a command
+family has a stable shared responsibility or the Lua chunk-local limit requires
+isolation. The supported-command inventory must be derived from the command
+registry instead of maintained as a second manual list.
 
 Safety is a cross-cutting responsibility implemented in models, services,
 `CommandOptions`, the file bridge, and Lua command definitions. Do not create a
@@ -272,6 +292,8 @@ Rules:
   FX name at that index.
 - Address FX parameters by guarded FX identity plus parameter index, and accept
   normalized parameter values from `0.0` to `1.0` for writes.
+- Return a next-call-ready `fx_identity` with public FX snapshots. Do not make
+  clients rename snapshot fields to construct the guard themselves.
 - Use REAPER marker and region IDs for marker and region identity, and guard
   deletes with expected names or timeline positions when callers provide them.
 - Accept time signature denominators only from `1`, `2`, `4`, `8`, `16`, `32`,
@@ -368,6 +390,7 @@ Rules:
 - Return changed object IDs after every successful mutation.
 - Reject ambiguous destructive operations.
 - Keep destructive tools explicit and narrow.
+- Require a current content fingerprint before deleting a track template.
 - Support dry-run for workflow tools where practical.
 - Enforce render and file path policies.
 - Require explicit allowed roots for media source reads.
@@ -375,6 +398,7 @@ Rules:
 - Never write outside configured roots.
 - Never assume a plugin, track, item, take, or FX exists.
 - Query or resolve project state before mutating it.
+- Verify high-risk mutation postconditions before returning success.
 
 ## Error model
 
@@ -405,6 +429,11 @@ Example:
 ```
 
 Error codes must live in one enum or constants module.
+
+A response ID must match the request ID that Python is awaiting. A mutating
+command that times out after publication returns `outcome_uncertain`; clients
+must refresh project state before deciding whether to retry. Read-only timeouts
+remain `command_timeout` or `bridge_not_running`.
 
 ## Tool design rules
 
@@ -439,7 +468,8 @@ Additional profiles:
 - `mixing`.
 - `full`.
 
-Experimental rendering remains a capability rather than a default profile.
+Experimental vocal tuning and rendering remain capabilities rather than part
+of the stable `production` profile.
 
 Required capability tools:
 
@@ -541,10 +571,143 @@ Required settings:
 - `REAPER_MCP_RENDER_EXTERNAL_ENABLED`.
 - `REAPER_MCP_REAPER_EXECUTABLE` when isolated rendering cannot discover
   REAPER.
+- `REAPER_MCP_FFMPEG_EXECUTABLE`.
+- `REAPER_MCP_AUDIO_MEASUREMENT_TIMEOUT_SECONDS`.
+- `REAPER_MCP_AUDIO_MEASUREMENT_MAX_OUTPUT_BYTES`.
 
 Configuration defaults must remain local and conservative. Approved-root lists
 default to empty, REST defaults to `127.0.0.1`, the stable tool profile defaults
-to `production`, and isolated rendering defaults to enabled.
+to `minimal`, and isolated rendering defaults to enabled.
+
+External audio measurement must use argv-only subprocess execution without a
+shell. It must bound runtime and captured output, report the resolved executable
+path and version, and reject a source whose SHA-256 changes during measurement.
+Sample peak, true peak, LUFS-I, momentary LUFS, short-term LUFS, and LRA remain
+separate typed values. Playback normalization is a caller-supplied simulation,
+not an artistic loudness target.
+
+## Mixing and reference workflow rules
+
+Mixing remains a human-guided workflow. Measurements and project state ground
+the agent's decisions, but they don't replace listening.
+
+Rules:
+
+- Audit the session and define each reference song's job before processing.
+- Support one or more references; never require a second reference to begin.
+- Route reference tracks directly to a selected stereo hardware output and
+  disable their master send so master FX cannot bias the comparison.
+- Configure reference routing by stable track GUID in one named undo
+  transaction, and verify both the hardware send and disabled master send.
+- Reuse an unambiguous matching hardware send instead of creating duplicates.
+- Reject duplicate sends to the requested hardware pair rather than guessing.
+- Compare at controlled checkpoints and match loudness by attenuation.
+- Compile scattered source lanes into explicit lead and double role tracks by
+  duplicating phrase items, moving the duplicates with guarded source and
+  destination GUIDs, and verifying that position and take offsets are
+  preserved.
+- Keep the original source lanes recoverable and mute them only after the
+  compiled role tracks pass a section-by-section listening check.
+- Treat editing, clip gain, and automation as first-line vocal controls.
+- Require an observed problem before proposing EQ, compression, de-essing,
+  source separation, or stereo-instrumental ducking.
+- Keep source separation as an explicit, last-resort producer decision.
+- Record human A/B judgment for consequential creative changes.
+- Approve the mix before creating its mastering session.
+
+## Vocal tuning workflow rules
+
+Vocal tuning is part of the mixing product. Providers sit behind one service
+contract so a plugin integration cannot create a separate tool or safety path.
+
+Rules:
+
+- Discover installed providers separately from verified control support.
+- Control `ReaTune` only through engineer-authored named FX presets. The preset
+  path may insert one ReaTune instance at FX index `0`, recall the exact preset
+  name, enable the instance, and verify the recalled name.
+- Bind the project state-change count, track GUID and name, installed FX
+  identifier, existing guarded FX identity, rollback preset, target preset, and
+  tuning mode to one approval hash.
+- Reject multiple ReaTune instances, an existing instance outside FX index `0`,
+  and an existing unnamed state that cannot be restored after a failed recall.
+- Roll back a failed ReaTune insertion or preset recall before returning an
+  error. Keep the complete mutation in one named undo transaction.
+- Never claim that preset-name verification proves the hidden key, scale,
+  attack, algorithm, allowed-note, or manual-correction state. Require an
+  engineer to author the song-specific preset and approve it by listening.
+- Never edit opaque ReaTune state chunks or automate its user interface.
+- Control x42 Auto Tune only through the official mono LV2 URI
+  `http://gareus.org/oss/lv2/fat1` and its verified host-exposed parameters.
+- Bind the complete root, scale, correction, smoothing, bias, tuning, fast-mode,
+  wet, bypass, and allowed-note parameter targets to the approval hash.
+- Verify every controlled x42 parameter by both index and name before mutation,
+  verify every normalized value after mutation, and roll back the insertion or
+  complete prior parameter state if any postcondition fails.
+- Keep x42 Auto Tune at FX index `0`, reject multiple instances, and keep the
+  complete mutation in one named undo transaction.
+- Never claim that the x42 adapter detects a key, repairs formants, or makes
+  large pitch errors transparent. The approved musical key comes from the
+  engineer, and the result requires a full-song listening pass for artifacts
+  and lost expression.
+- Treat `reaper_take_pitch` as correction execution, not pitch analysis.
+- Require explicit, chronological, non-overlapping note segments in absolute
+  project seconds.
+- Bind the provider, project state-change count, track, item, active take,
+  item boundaries, base take pitch, and corrections to one approval hash.
+- Require a single-take audio item so splitting cannot alter hidden takes.
+- Revalidate the exact plan before mutation and again at the Lua boundary.
+- Apply all approved segment splits and pitch offsets in one named undo
+  transaction, verify each resulting pitch value, and restore the original
+  item if a bridge operation fails.
+- Preserve vibrato by applying one static offset to the complete observed note
+  segment. Require listening review for note-boundary artifacts.
+- Keep provider-specific command construction behind the provider interface.
+- Do not claim automatic tuning, note detection, formant correction, or
+  commercial-plugin quality without an implemented provider and retained
+  acceptance evidence.
+
+## Mastering workflow rules
+
+Mastering extends the producer and mixing product; it does not create a second
+server, bridge, or safety model.
+
+Rules:
+
+- Bind sessions, plans, candidates, approvals, deliveries, and albums to
+  SHA-256 evidence.
+- Preview complete master-FX changes and require the exact current approval
+  hash before one named undo transaction.
+- Publish typed mastering inputs at the MCP boundary. Normalize documented,
+  unambiguous client aliases before service validation and serialize one
+  canonical internal operation shape.
+- Reject stale source, project, chain, FX, parameter-name, render, or manifest
+  evidence instead of attempting repair during mutation.
+- Exclude public routing helpers such as `fx_identity` from canonical project
+  and master-chain fingerprints; hash only observed REAPER state.
+- Never guess third-party plugin parameter meaning.
+- Render and measure the actual candidate WAV before comparison.
+- Match A/B loudness by attenuation only; never boost a quieter candidate or
+  claim an artistic preference.
+- Require explicit human listening confirmation and judgment notes before
+  candidate or album approval.
+- Create delivery artifacts as temporary files, run typed final-file QC, and
+  publish atomically only when every requested variant passes.
+- Build alternate-version sets only from distinct, current, explicitly
+  approved candidate artifacts; grouping does not synthesize a clean,
+  instrumental, radio, or other version.
+- Measure lossy previews from the decoded AAC, MP3, or Opus bitstream and
+  report source-to-decoded deltas before atomically publishing either file.
+- Apply dither exactly once when quantizing to an integer delivery depth; do
+  not dither float output or integer word-length expansion.
+- Keep album sequence assets separate from approved song masters and preserve
+  both source and asset fingerprints.
+- Do not expose DDP until generation and an independent accepted reader both
+  pass retained evidence.
+- Score AI mastering traces with deterministic binary rules for tool order,
+  approval evidence, mutation gates, and truthful completion claims; keep
+  human review for artistic output.
+- Run large audio-file hashing outside the async event loop.
 
 ## Anti-hallucination rules
 
@@ -585,3 +748,10 @@ Keep the `production` profile free of experimental native render tools until
 live evidence proves bridge liveness, output integrity, and state restoration.
 Measure file-bridge latency before adding another transport, and require live
 REAPER evidence when a change affects identity, undo, or native API behavior.
+Run live REAPER acceptance for vocal segment splitting, pitch postconditions,
+failure rollback, and undo before promoting the tuning capability. Add pitch
+analysis only as a separate evidence-producing provider step.
+Complete one retained end-to-end vocal mix and isolated master with
+master-FX-bypassed reference routing, producer listening notes, candidate
+approval, codec preview, and delivery QC before calling the full artistic
+workflow production-ready.
