@@ -19,6 +19,12 @@ local function expanded_command_error(request_id, envelope, error_text)
       action = "Refresh item takes and retry with supported values.",
     },
     {
+      prefix = "invalid_fixed_lane_request:",
+      code = "invalid_fixed_lane_request",
+      message = "The fixed-lane request does not match the current track layout.",
+      action = "Refresh fixed lanes and retry with the current layout fingerprint.",
+    },
+    {
       prefix = "invalid_navigation_request:",
       code = "invalid_navigation_request",
       message = "The project navigation request is invalid.",

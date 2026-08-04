@@ -755,6 +755,193 @@ COMMANDS.crop_to_active_take = {
   end,
 }
 
+local function fixed_lane_name(track, lane_index)
+  local _, name = reaper.GetSetMediaTrackInfo_String(
+    track,
+    "P_LANENAME:" .. lane_index,
+    "",
+    false
+  )
+  return name or ""
+end
+
+local function fixed_lane_play_state(track, lane_index)
+  return math.floor(safe_number_call(
+    reaper.GetMediaTrackInfo_Value,
+    0,
+    track,
+    "C_LANEPLAYS:" .. lane_index
+  ))
+end
+
+local function fixed_lane_items(track, lane_index)
+  local items = {}
+  local item_count = safe_number_call(reaper.CountTrackMediaItems, 0, track)
+  for item_index = 0, item_count - 1 do
+    local item = reaper.GetTrackMediaItem(track, item_index)
+    local item_lane = item and math.floor(safe_number_call(
+      reaper.GetMediaItemInfo_Value,
+      -1,
+      item,
+      "I_FIXEDLANE"
+    )) or -1
+    if item and item_lane == lane_index then
+      items[#items + 1] = {
+        guid = item_guid(item),
+        position_seconds = safe_number_call(
+          reaper.GetMediaItemInfo_Value,
+          0,
+          item,
+          "D_POSITION"
+        ),
+        length_seconds = safe_number_call(
+          reaper.GetMediaItemInfo_Value,
+          0,
+          item,
+          "D_LENGTH"
+        ),
+        muted = safe_number_call(
+          reaper.GetMediaItemInfo_Value,
+          0,
+          item,
+          "B_MUTE"
+        ) ~= 0,
+      }
+    end
+  end
+  return items
+end
+
+local function fingerprint_field(value)
+  local text = tostring(value or "")
+  return tostring(#text) .. ":" .. text
+end
+
+local function fixed_lane_layout(track, track_guid_value, changed)
+  local mode = math.floor(safe_number_call(
+    reaper.GetMediaTrackInfo_Value,
+    0,
+    track,
+    "I_FREEMODE"
+  ))
+  if mode ~= 2 then
+    error("invalid_fixed_lane_request: track is not in REAPER fixed-lane mode")
+  end
+  local lane_count = math.floor(safe_number_call(
+    reaper.GetMediaTrackInfo_Value,
+    0,
+    track,
+    "I_NUMFIXEDLANES"
+  ))
+  if lane_count < 1 then
+    error("invalid_fixed_lane_request: fixed-lane track has no lanes")
+  end
+
+  local lanes = {}
+  local fingerprint = {
+    fingerprint_field(track_guid_value),
+    tostring(mode),
+    tostring(lane_count),
+  }
+  for lane_index = 0, lane_count - 1 do
+    local name = fixed_lane_name(track, lane_index)
+    local play_state = fixed_lane_play_state(track, lane_index)
+    if play_state < 0 or play_state > 2 then
+      error("invalid_fixed_lane_request: REAPER returned an invalid lane play state")
+    end
+    local items = fixed_lane_items(track, lane_index)
+    lanes[#lanes + 1] = {
+      index = lane_index,
+      name = name,
+      play_state = play_state,
+      items = items,
+    }
+    fingerprint[#fingerprint + 1] = tostring(lane_index)
+    fingerprint[#fingerprint + 1] = fingerprint_field(name)
+    fingerprint[#fingerprint + 1] = tostring(play_state)
+    fingerprint[#fingerprint + 1] = tostring(#items)
+    for _, item in ipairs(items) do
+      fingerprint[#fingerprint + 1] = fingerprint_field(item.guid)
+      fingerprint[#fingerprint + 1] = string.format("%.17g", item.position_seconds)
+      fingerprint[#fingerprint + 1] = string.format("%.17g", item.length_seconds)
+      fingerprint[#fingerprint + 1] = item.muted and "1" or "0"
+    end
+  end
+  return {
+    track_guid = track_guid_value,
+    lane_count = lane_count,
+    layout_fingerprint = table.concat(fingerprint, "|"),
+    lanes = lanes,
+    changes_applied = changed or false,
+  }
+end
+
+COMMANDS.list_fixed_lanes = {
+  mutates_project = false,
+  handler = function(envelope)
+    local project = current_project()
+    local track = require_track_by_guid(project, envelope.args.track_guid)
+    return fixed_lane_layout(track, envelope.args.track_guid, false)
+  end,
+}
+
+local function select_fixed_lane_plan(envelope)
+  local project = current_project()
+  local track = require_track_by_guid(project, envelope.args.track_guid)
+  local layout = fixed_lane_layout(track, envelope.args.track_guid, false)
+  local lane_index = envelope.args.lane_index
+  if type(lane_index) ~= "number" or lane_index < 0
+    or lane_index % 1 ~= 0 or lane_index >= layout.lane_count then
+    error("invalid_fixed_lane_request: lane_index is outside the current layout")
+  end
+  if type(envelope.args.expected_layout_fingerprint) ~= "string"
+    or envelope.args.expected_layout_fingerprint ~= layout.layout_fingerprint then
+    error("invalid_fixed_lane_request: fixed-lane layout no longer matches")
+  end
+  return track, layout, lane_index
+end
+
+COMMANDS.select_fixed_lane = {
+  mutates_project = true,
+  preflight_handler = select_fixed_lane_plan,
+  handler = function(envelope)
+    local track, previous, lane_index = select_fixed_lane_plan(envelope)
+    local changed = reaper.SetMediaTrackInfo_Value(
+      track,
+      "C_LANEPLAYS:" .. lane_index,
+      1
+    )
+    if not changed then
+      error("invalid_fixed_lane_request: REAPER rejected fixed-lane selection")
+    end
+    reaper.TrackList_AdjustWindows(false)
+    reaper.UpdateArrange()
+
+    local updated = fixed_lane_layout(track, envelope.args.track_guid, true)
+    local valid = true
+    for _, lane in ipairs(updated.lanes) do
+      local expected = lane.index == lane_index and 1 or 0
+      if lane.play_state ~= expected then
+        valid = false
+        break
+      end
+    end
+    if not valid then
+      for _, lane in ipairs(previous.lanes) do
+        reaper.SetMediaTrackInfo_Value(
+          track,
+          "C_LANEPLAYS:" .. lane.index,
+          lane.play_state
+        )
+      end
+      reaper.TrackList_AdjustWindows(false)
+      reaper.UpdateArrange()
+      error("postcondition_failed: fixed-lane playback state did not match")
+    end
+    return updated
+  end,
+}
+
 local function timeline_range(start_seconds, end_seconds)
   return {
     start_seconds = start_seconds,

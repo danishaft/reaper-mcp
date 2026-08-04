@@ -43,7 +43,7 @@ def test_cli_profile_override_exposes_full_surface(
     payload = json.loads(capsys.readouterr().out)
 
     assert exit_code == 0
-    assert payload["count"] == 170
+    assert payload["count"] == 172
 
 
 def test_cli_reports_invalid_json(monkeypatch, tmp_path: Path, capsys) -> None:

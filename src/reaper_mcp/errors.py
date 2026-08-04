@@ -37,6 +37,7 @@ class ErrorCode(StrEnum):
     INVALID_SEND_REQUEST = "invalid_send_request"
     INVALID_TAKE_REFERENCE = "invalid_take_reference"
     INVALID_TAKE_REQUEST = "invalid_take_request"
+    INVALID_FIXED_LANE_REQUEST = "invalid_fixed_lane_request"
     INVALID_TEMPO_REQUEST = "invalid_tempo_request"
     INVALID_TIME_POSITION = "invalid_time_position"
     INVALID_TRACK_REQUEST = "invalid_track_request"

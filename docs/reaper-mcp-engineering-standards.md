@@ -303,6 +303,13 @@ Rules:
 - Resolve index inputs to GUIDs before a mutating operation.
 - Reject ambiguous natural-language references unless a resolver can prove a
   single match.
+- Treat REAPER fixed lanes as track-owned layout positions, not media takes.
+  Because lanes do not expose stable GUIDs, guard a lane mutation with the
+  track GUID, lane index, and a fingerprint of lane names, playback state, and
+  assigned item GUIDs.
+- Describe whole-lane playback selection as fixed-lane selection, not swipe
+  comping. Do not automate comp areas until REAPER exposes a stable,
+  live-verified representation that can be preflighted and restored.
 
 ## Algorithm decisions
 

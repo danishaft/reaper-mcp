@@ -23,6 +23,7 @@ from reaper_mcp.services.audio_measurement_service import AudioMeasurementServic
 from reaper_mcp.services.automation_service import AutomationService
 from reaper_mcp.services.batch_service import BatchService
 from reaper_mcp.services.diagnostics_service import DiagnosticsService
+from reaper_mcp.services.fixed_lane_service import FixedLaneService
 from reaper_mcp.services.freeze_service import FreezeService
 from reaper_mcp.services.fx_service import FxService
 from reaper_mcp.services.health_service import HealthService
@@ -1442,6 +1443,50 @@ async def test_reaper_automation_takes_and_navigation_acceptance() -> None:
 
     assert (await project.delete_track(track_guid))["changes_applied"] is True
     assert (await navigation.save_project())["saved"] is True
+
+
+@pytest.mark.asyncio
+async def test_reaper_fixed_lane_selection_and_undo_acceptance() -> None:
+    """Verify guarded whole-lane selection and undo in isolated REAPER."""
+
+    bridge_dir = Path(os.environ["REAPER_MCP_BRIDGE_DIR"])
+    bridge = _bridge_client(bridge_dir)
+    fixed_lanes = FixedLaneService(bridge)
+    project = ProjectService(bridge)
+
+    fixture = _run_probe(bridge_dir, "create_fixed_lane_fixture")
+    track_guid = fixture["track_guid"]
+    assert track_guid
+
+    initial = await fixed_lanes.list_fixed_lanes(track_guid)
+    assert initial["ok"] is True
+    assert initial["lane_count"] == 2
+    assert [lane["name"] for lane in initial["lanes"]] == ["Lead A", "Lead B"]
+    assert [lane["play_state"] for lane in initial["lanes"]] == [1, 0]
+    assert [len(lane["items"]) for lane in initial["lanes"]] == [1, 1]
+
+    stale = await fixed_lanes.select_fixed_lane(
+        track_guid,
+        1,
+        initial["layout_fingerprint"] + "-stale",
+    )
+    assert stale["ok"] is False
+    assert stale["error"]["code"] == "invalid_fixed_lane_request"
+
+    selected = await fixed_lanes.select_fixed_lane(
+        track_guid,
+        1,
+        initial["layout_fingerprint"],
+    )
+    assert selected["ok"] is True
+    assert selected["changes_applied"] is True
+    assert [lane["play_state"] for lane in selected["lanes"]] == [0, 1]
+    assert _run_probe(bridge_dir)["undo_label"] == "Select fixed lane 2"
+
+    _run_probe(bridge_dir, "undo")
+    restored = await fixed_lanes.list_fixed_lanes(track_guid)
+    assert [lane["play_state"] for lane in restored["lanes"]] == [1, 0]
+    assert (await project.delete_track(track_guid))["changes_applied"] is True
 
 
 @pytest.mark.asyncio

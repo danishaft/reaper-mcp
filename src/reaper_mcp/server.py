@@ -17,6 +17,7 @@ from reaper_mcp.services.audio_program_analysis_service import (
 from reaper_mcp.services.automation_service import AutomationService
 from reaper_mcp.services.batch_service import BatchService
 from reaper_mcp.services.diagnostics_service import DiagnosticsService
+from reaper_mcp.services.fixed_lane_service import FixedLaneService
 from reaper_mcp.services.freeze_service import FreezeService
 from reaper_mcp.services.fx_service import FxService
 from reaper_mcp.services.health_service import HealthService
@@ -64,6 +65,7 @@ from reaper_mcp.tools.audio_analysis import register_audio_analysis_tools
 from reaper_mcp.tools.automation import register_automation_tools
 from reaper_mcp.tools.batch import register_batch_tools
 from reaper_mcp.tools.diagnostics import register_diagnostics_tools
+from reaper_mcp.tools.fixed_lane import register_fixed_lane_tools
 from reaper_mcp.tools.freeze import register_freeze_tools
 from reaper_mcp.tools.fx import register_fx_tools
 from reaper_mcp.tools.health import register_health_tool
@@ -130,6 +132,7 @@ def create_server(settings: Settings | None = None) -> ProfiledFastMCP:
         allowed_media_source_roots=resolved_settings.allowed_media_source_roots,
     )
     take_service = TakeService(bridge_client)
+    fixed_lane_service = FixedLaneService(bridge_client)
     plan_service = MasteringPlanService(bridge_client, fx_service, project_service)
     render_service = RenderService(
         bridge_client,
@@ -230,6 +233,7 @@ def create_server(settings: Settings | None = None) -> ProfiledFastMCP:
     register_tempo_tools(server, TempoService(bridge_client))
     register_tempo_map_tools(server, TempoMapService(bridge_client))
     register_take_tools(server, take_service)
+    register_fixed_lane_tools(server, fixed_lane_service)
     register_vocal_tuning_tools(
         server,
         VocalTuningService(

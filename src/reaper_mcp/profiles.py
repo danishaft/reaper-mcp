@@ -156,6 +156,8 @@ CAPABILITY_TOOLS: dict[str, frozenset[str]] = {
             "set_take_pitch",
             "set_take_playback_rate",
             "crop_to_active_take",
+            "list_fixed_lanes",
+            "select_fixed_lane",
         }
     ),
     "navigation": frozenset(

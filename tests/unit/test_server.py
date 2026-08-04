@@ -27,7 +27,7 @@ async def test_production_profile_exposes_every_stable_capability(
             expected.update(capability_tools)
 
     assert {tool.name for tool in tools} == expected
-    assert len(tools) == 146
+    assert len(tools) == 148
     assert "create_mastering_session" not in expected
 
 
@@ -50,7 +50,7 @@ async def test_full_profile_exposes_all_tools(tmp_path: Path) -> None:
         expected.update(capability_tools)
 
     assert {tool.name for tool in tools} == expected
-    assert len(tools) == 170
+    assert len(tools) == 172
     assert "create_mastering_session" in expected
     assert "analyze_audio_program" in expected
     assert "preview_mastering_plan" in expected
@@ -70,6 +70,8 @@ async def test_full_profile_exposes_all_tools(tmp_path: Path) -> None:
     assert "apply_vocal_tuning_preset_plan" in expected
     assert "preview_vocal_tuning_plugin_plan" in expected
     assert "apply_vocal_tuning_plugin_plan" in expected
+    assert "list_fixed_lanes" in expected
+    assert "select_fixed_lane" in expected
 
 
 async def test_fx_tools_publish_guarded_identity_schema(tmp_path: Path) -> None:

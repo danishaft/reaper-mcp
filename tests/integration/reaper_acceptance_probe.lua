@@ -35,6 +35,7 @@ local command_path = path_join(bridge_dir, "acceptance-probe-command.txt")
 local output_path = path_join(bridge_dir, "acceptance-probe.json")
 local last_request_id = nil
 local last_action_name = ""
+local last_track_guid = ""
 
 local function execute_command(command)
   last_action_name = ""
@@ -66,6 +67,36 @@ local function execute_command(command)
       error("Action command ID must be numeric")
     end
     last_action_name = reaper.kbd_getTextFromCmd(command_id, 0) or ""
+  elseif command == "create_fixed_lane_fixture" then
+    reaper.Undo_BeginBlock2(0)
+    reaper.InsertTrackAtIndex(reaper.CountTracks(0), true)
+    local track = reaper.GetTrack(0, reaper.CountTracks(0) - 1)
+    if not track then
+      error("REAPER did not create the fixed-lane fixture track")
+    end
+    reaper.GetSetMediaTrackInfo_String(
+      track,
+      "P_NAME",
+      "Fixed Lane Acceptance",
+      true
+    )
+    reaper.SetMediaTrackInfo_Value(track, "I_FREEMODE", 2)
+    reaper.SetMediaTrackInfo_Value(track, "I_NUMFIXEDLANES", 2)
+    local first = reaper.CreateNewMIDIItemInProj(track, 0, 1, false)
+    local second = reaper.CreateNewMIDIItemInProj(track, 1, 2, false)
+    if not first or not second then
+      error("REAPER did not create the fixed-lane fixture items")
+    end
+    reaper.SetMediaItemInfo_Value(first, "I_FIXEDLANE", 0)
+    reaper.SetMediaItemInfo_Value(second, "I_FIXEDLANE", 1)
+    reaper.GetSetMediaTrackInfo_String(track, "P_LANENAME:0", "Lead A", true)
+    reaper.GetSetMediaTrackInfo_String(track, "P_LANENAME:1", "Lead B", true)
+    reaper.SetMediaTrackInfo_Value(track, "C_LANEPLAYS:0", 1)
+    reaper.TrackList_AdjustWindows(false)
+    reaper.UpdateTimeline()
+    reaper.UpdateArrange()
+    last_track_guid = reaper.GetTrackGUID(track) or ""
+    reaper.Undo_EndBlock2(0, "Create fixed lane fixture", -1)
   elseif command ~= "status" then
     error("Unsupported acceptance probe command: " .. tostring(command))
   end
@@ -79,7 +110,8 @@ local function write_output(request_id, command, command_error)
   output:write(string.format(
     '{"request_id":"%s","command":"%s","error":"%s","action_name":"%s",'
       .. '"dirty":%s,"play_state":%d,"redo_label":"%s",'
-      .. '"state_change_count":%d,"track_count":%d,"undo_label":"%s"}',
+      .. '"state_change_count":%d,"track_count":%d,"track_guid":"%s",'
+      .. '"undo_label":"%s"}',
     json_escape(request_id),
     json_escape(command),
     json_escape(command_error or ""),
@@ -89,6 +121,7 @@ local function write_output(request_id, command, command_error)
     json_escape(reaper.Undo_CanRedo2(0) or ""),
     reaper.GetProjectStateChangeCount(0),
     reaper.CountTracks(0),
+    json_escape(last_track_guid),
     json_escape(reaper.Undo_CanUndo2(0) or "")
   ))
   output:close()
