@@ -114,4 +114,8 @@ def test_main_installs_bridge(
 
     assert result == 0
     assert (resource_path / "Scripts" / BRIDGE_FILENAME).is_file()
-    assert "Installed REAPER MCP bridge" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "Installed REAPER MCP bridge" in output
+    assert "Actions > Show action list" in output
+    assert str(resource_path / "Scripts" / BRIDGE_FILENAME) in output
+    assert "reaper-mcp-cli health" in output

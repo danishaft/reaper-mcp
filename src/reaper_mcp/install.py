@@ -208,7 +208,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Backed up previous bridge module: {backup_path}")
     else:
         print(f"REAPER MCP bridge is already current: {result.target_path}")
-    print("In REAPER, add the installed script from Actions > New action > Load.")
+    print("Next steps:")
+    print("1. Open REAPER and choose Actions > Show action list.")
+    print("2. Choose New action > Load ReaScript, then select:")
+    print(f"   {result.target_path}")
+    print("3. Select reaper_mcp_bridge.lua in the action list and choose Run.")
+    print("4. Start the server with: reaper-mcp")
+    print("5. Verify the connection with: reaper-mcp-cli health")
+    print("When running from source, prefix these commands with: uv run")
     return 0
 
 

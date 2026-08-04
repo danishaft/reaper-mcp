@@ -24,7 +24,7 @@
   <img src="https://img.shields.io/badge/Windows-CI%20tested-6f42c1.svg?style=flat-square" alt="Windows CI tested, REAPER unverified">
   <img src="https://img.shields.io/badge/MCP-stdio%20%7C%20REST-6f42c1.svg?style=flat-square" alt="MCP stdio and REST">
   <img src="https://img.shields.io/badge/CLI-supported-6f42c1.svg?style=flat-square" alt="CLI supported">
-  <img src="https://img.shields.io/badge/tools-170-6f42c1.svg?style=flat-square" alt="170 tools">
+  <img src="https://img.shields.io/badge/tools-172-6f42c1.svg?style=flat-square" alt="172 tools">
 </p>
 
 <p align="center">
@@ -49,7 +49,7 @@ approved ReaScript commands.
 | Producer workflow | Representative tools | What it enables |
 | --- | --- | --- |
 | **Build** | `create_song_starter`, `create_track`, `create_midi_pattern` | Start a song with tracks, MIDI parts, and a region |
-| **Arrange** | `move_media_item`, `move_media_item_to_track`, `split_media_item`, `create_region` | Shape sections and compile scattered performances into role tracks |
+| **Arrange** | `move_media_item`, `split_media_item`, `list_fixed_lanes`, `select_fixed_lane` | Shape sections and safely audition one complete REAPER fixed lane |
 | **Edit MIDI** | `add_midi_notes`, `quantize_midi_notes`, `humanize_midi_notes`, `snap_midi_notes_to_scale` | Write, correct, and vary musical performances |
 | **Mix** | `set_track_volume`, `add_fx`, `setup_sidechain`, `configure_reference_track` | Balance tracks, build guarded processing chains, and audition references outside master FX |
 | **Tune vocals** | `list_vocal_tuning_providers`, `preview_vocal_tuning_plugin_plan`, `apply_vocal_tuning_plugin_plan` | Apply approved scale-aware pitch correction through a verified, undoable provider |
@@ -60,7 +60,7 @@ approved ReaScript commands.
 | **Render** | `render_project`, `render_project_start`, `render_project_result` | Produce approved WAV output with completion checks |
 
 The default `minimal` profile exposes 26 focused tools. Opt into `production`
-for 146 stable tools or `full` for all 170 tools, including experimental vocal
+for 148 stable tools or `full` for all 172 tools, including experimental vocal
 tuning, mastering, and render lifecycle operations.
 
 ## Interfaces
@@ -70,9 +70,9 @@ Lua bridge. They are different ways to reach the same product.
 
 | Interface | Best for | Start |
 | --- | --- | --- |
-| **MCP** | Claude, Codex, Cursor, and other AI clients | `uv run reaper-mcp` |
-| **CLI** | Producers, shell scripts, automation, and CI | `uv run reaper-mcp-cli` |
-| **REST** | Local apps, integrations, and future video or web clients | `REAPER_MCP_TRANSPORT=http uv run reaper-mcp` |
+| **MCP** | Claude, Codex, Cursor, and other AI clients | `reaper-mcp` |
+| **CLI** | Producers, shell scripts, automation, and CI | `reaper-mcp-cli` |
+| **REST** | Local apps, integrations, and future video or web clients | `REAPER_MCP_TRANSPORT=http reaper-mcp` |
 
 ## Quick demo
 
@@ -106,30 +106,52 @@ step. Read the returned identities instead of guessing from track positions.
 
 ## Quick start
 
-REAPER MCP currently targets Python 3.11 or newer, `uv`, and a local REAPER
-installation. Linux with REAPER 7.66 is the live-verified environment.
+You can connect REAPER MCP in a few minutes. You need REAPER and
+[`uv`](https://docs.astral.sh/uv/getting-started/installation/). Linux with
+REAPER 7.66 is the live-verified environment.
 
-### Install
+### 1. Install the server and bridge
 
-```bash
-git clone https://github.com/danishaft/reaper-mcp.git
-cd reaper-mcp
-uv sync
-uv run reaper-mcp-install
-```
-
-Open REAPER, load `reaper_mcp_bridge.lua` from the Actions list, and run it as
-a ReaScript. Then start the MCP server:
+Install the Python package as an isolated command-line tool, then copy its
+packaged Lua bridge into your REAPER resource directory:
 
 ```bash
-uv run reaper-mcp
+uv tool install danishaft-reaper-mcp
+reaper-mcp-install
 ```
 
-Check the bridge before making changes:
+The installer prints the exact bridge path and the remaining REAPER steps. It
+backs up an older bridge when the installed content differs.
+
+### 2. Activate the bridge in REAPER
+
+Open REAPER and complete these steps once:
+
+1. Choose **Actions > Show action list**.
+2. Choose **New action > Load ReaScript**.
+3. Select the `reaper_mcp_bridge.lua` path printed by the installer.
+4. Select `reaper_mcp_bridge.lua` in the action list, then choose **Run**.
+
+Run the bridge again after restarting REAPER. You can add it to a REAPER
+startup action after confirming the first connection.
+
+### 3. Start and verify the server
+
+Keep REAPER open with the bridge running. Verify the connection before changing
+a project:
 
 ```bash
-uv run reaper-mcp-cli health
+reaper-mcp-cli health
 ```
+
+Then start the MCP server:
+
+```bash
+reaper-mcp
+```
+
+A successful result reports both the Python server and the REAPER bridge as
+available. Continue to [MCP setup](#mcp-setup) to connect your AI client.
 
 ## Platform support
 
@@ -146,12 +168,12 @@ unverified platform as production-ready until REAPER has been exercised there.
 
 ## Available tool surface
 
-The server registers 170 tools and exposes 26 focused tools in the default
+The server registers 172 tools and exposes 26 focused tools in the default
 `minimal` profile. Use discovery instead of memorizing the complete list.
 
 ```bash
-uv run reaper-mcp-cli tools --pretty
-uv run reaper-mcp-cli capabilities --pretty
+reaper-mcp-cli tools --pretty
+reaper-mcp-cli capabilities --pretty
 ```
 
 The `production`, `midi`, and `mixing` profiles provide larger task-specific
@@ -177,11 +199,10 @@ Add the server to an MCP client that supports stdio transport:
 {
   "mcpServers": {
     "reaper-mcp": {
-      "command": "uv",
+      "command": "uvx",
       "args": [
-        "--directory",
-        "/home/you/projects/reaper-mcp",
-        "run",
+        "--from",
+        "danishaft-reaper-mcp",
         "reaper-mcp"
       ],
       "env": {
@@ -190,6 +211,17 @@ Add the server to an MCP client that supports stdio transport:
     }
   }
 }
+```
+
+To work on the implementation instead of the released package, clone the
+repository and point the client at the checkout:
+
+```bash
+git clone https://github.com/danishaft/reaper-mcp.git
+cd reaper-mcp
+uv sync --locked
+uv run reaper-mcp-install
+uv run reaper-mcp
 ```
 
 The server exposes the `minimal` profile by default. Use the profile tools or
@@ -203,19 +235,19 @@ for common producer operations; they do not create a second implementation.
 
 ```bash
 # Discover the active tool surface.
-uv run reaper-mcp-cli tools --pretty
+reaper-mcp-cli tools --pretty
 
 # Call any tool with a JSON object.
-uv run reaper-mcp-cli call set_tempo --json '{"bpm": 96}'
+reaper-mcp-cli call set_tempo --json '{"bpm": 96}'
 
 # Use readable producer-facing aliases.
-uv run reaper-mcp-cli project snapshot
-uv run reaper-mcp-cli tracks list
-uv run reaper-mcp-cli transport play
-uv run reaper-mcp-cli transport stop
+reaper-mcp-cli project snapshot
+reaper-mcp-cli tracks list
+reaper-mcp-cli transport play
+reaper-mcp-cli transport stop
 
 # Use the complete profile when an experimental tool is required.
-uv run reaper-mcp-cli --profile full tools --pretty
+reaper-mcp-cli --profile full tools --pretty
 ```
 
 Use `--arg key=value` for simple scalar arguments and `--json` for nested
@@ -230,7 +262,7 @@ layer. It reuses the MCP registry and returns the same structured tool results.
 export REAPER_MCP_TRANSPORT=http
 export REAPER_MCP_HTTP_HOST=127.0.0.1
 export REAPER_MCP_HTTP_PORT=8765
-uv run reaper-mcp
+reaper-mcp
 ```
 
 Available endpoints:
@@ -349,7 +381,8 @@ operations, transport, media, MIDI, FX, routing, automation, takes,
 arrangement, tempo, templates, analysis, workflows, interfaces, and isolated
 project rendering on Linux with REAPER 7.66. A July 28 targeted run also covers
 stock ReaEQ, ReaComp, and ReaLimit on the master bus plus guarded mastering
-plan preview, apply, and undo.
+plan preview, apply, and undo. An August 4 isolated run covers guarded REAPER 7
+whole-lane selection, stale-layout rejection, postcondition checks, and undo.
 
 Run the local checks without REAPER:
 
@@ -383,6 +416,9 @@ Known limitations are deliberate and documented:
   parameter contract on Linux but no formant correction; ReaTune requires an
   engineer-authored named preset. The take-pitch bridge command still needs
   live REAPER acceptance.
+- Fixed-lane tools inspect and select complete lanes. Swipe-comp area creation
+  and automatic phrase comping remain out of scope because REAPER does not
+  expose comp areas as stable, directly addressable API objects.
 - The Lua bridge must be running inside REAPER before a tool can execute.
 - Plugin UI automation, audio-rate control, and cloud collaboration are out
   of scope.
@@ -438,8 +474,9 @@ REAPER execution, tests, and release documentation.
 
 ## Releases and contribution
 
-Tagged releases publish the Python source distribution and wheel through the
-[release workflow](https://github.com/danishaft/reaper-mcp/actions/workflows/release.yml).
+Tagged releases publish `danishaft-reaper-mcp` to PyPI through Trusted
+Publishing, then attach the same source distribution and wheel to the
+[GitHub release](https://github.com/danishaft/reaper-mcp/actions/workflows/release.yml).
 The package still requires a local REAPER installation and a compatible Lua
 bridge; it is not a bundled REAPER application.
 
