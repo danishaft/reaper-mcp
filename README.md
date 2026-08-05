@@ -2,8 +2,6 @@
   <img src="assets/reaper-mcp-hero.png" alt="REAPER MCP producer workflow" width="1100">
 </p>
 
-<!-- Replace the hero image with the product demo video when it is ready. -->
-
 <h1 align="center">REAPER MCP</h1>
 
 <p align="center">
@@ -27,12 +25,6 @@
   <img src="https://img.shields.io/badge/tools-172-6f42c1.svg?style=flat-square" alt="172 tools">
 </p>
 
-<p align="center">
-  <a href="#quick-start">Quick start</a> ·
-  <a href="#interfaces">Interfaces</a> ·
-  <a href="CONTRIBUTING.md">Contributing</a>
-</p>
-
 ## What it is
 
 REAPER MCP connects an AI client or local script to a real REAPER project. It
@@ -45,6 +37,9 @@ profiles, and workflows. A Lua bridge runs inside REAPER and executes the
 approved ReaScript commands.
 
 ## What producers can do
+
+The tool surface covers the production workflow from session creation through
+delivery:
 
 | Producer workflow | Representative tools | What it enables |
 | --- | --- | --- |
@@ -59,10 +54,6 @@ approved ReaScript commands.
 | **Deliver** | `deliver_mastering_candidate`, `create_mastering_codec_preview`, `create_mastering_version_set`, `prepare_mastering_album` | Verify PCM WAVs, measure decoded AAC/MP3/Opus previews, group approved versions, and prepare albums |
 | **Render** | `render_project`, `render_project_start`, `render_project_result` | Produce approved WAV output with completion checks |
 
-The default `minimal` profile exposes 26 focused tools. Opt into `production`
-for 148 stable tools or `full` for all 172 tools, including experimental vocal
-tuning, mastering, and render lifecycle operations.
-
 ## Interfaces
 
 All interfaces use the same services, profiles, safety rules, error model, and
@@ -72,37 +63,7 @@ Lua bridge. They are different ways to reach the same product.
 | --- | --- | --- |
 | **MCP** | Claude, Codex, Cursor, and other AI clients | `reaper-mcp` |
 | **CLI** | Producers, shell scripts, automation, and CI | `reaper-mcp-cli` |
-| **REST** | Local apps, integrations, and future video or web clients | `REAPER_MCP_TRANSPORT=http reaper-mcp` |
-
-## Quick demo
-
-With REAPER open and the Lua bridge running, a producer can create and inspect a
-song starter through the same tools an AI client uses. The example below shows
-the interaction shape; returned GUIDs are then used for later guarded edits.
-
-```text
-Producer: Create an 8-bar A-minor song starter and show me what was created.
-
-1. create_song_starter
-   {"name":"A-minor demo","bars":8,"root_note":69,"mode":"minor"}
-   -> Creates Drums, Bass, Chords, and Lead parts plus one song region.
-      The response returns stable track, item, take, and region identities.
-
-2. get_project_snapshot
-   {}
-   -> Returns the current project, transport state, tracks, markers, and regions.
-
-3. list_available_fx
-   {}
-   -> Returns the FX installed in this REAPER profile.
-
-4. list_track_fx
-   {"track_guid":"<drums-track-guid>"}
-   -> Reads the drum track FX chain without changing the project.
-```
-
-Every write is validated before execution and appears as one named REAPER undo
-step. Read the returned identities instead of guessing from track positions.
+| **REST** | Local apps and integrations | `REAPER_MCP_TRANSPORT=http reaper-mcp` |
 
 ## Quick start
 
@@ -177,19 +138,11 @@ reaper-mcp-cli capabilities --pretty
 ```
 
 The `production`, `midi`, and `mixing` profiles provide larger task-specific
-surfaces. `mixing` includes experimental vocal tuning; `full` also exposes
-experimental mastering and render lifecycle operations. The tuning workflow
-executes supplied note-segment corrections through stable REAPER take-pitch
-controls. It can insert x42 Auto Tune first and directly set its documented
-root-scale note mask, correction, smoothing, bias, tuning, fast mode, and wet
-controls, or recall an engineer-authored ReaTune preset without editing hidden
-plugin state. It does not detect the song key or claim formant-safe correction.
-Mastering has local unit, FFmpeg, isolated-child REAPER, Linux
-stock master-FX coverage, and one complete Codex-to-MCP isolated mastering
-acceptance run. The official EBU v5.0 compliance run passes the selected Tech
-3341 loudness and true-peak cases. Retained engineer listening evidence,
-deterministic scoring of captured client traces, and macOS/Windows REAPER
-acceptance remain pending.
+surfaces. The `full` profile exposes all tools, including experimental vocal
+tuning, mastering, and render lifecycle operations.
+
+> **Note:** Experimental tools are preview features under active development.
+> Review the limitations before using them on production work.
 
 ## MCP setup
 
@@ -319,91 +272,16 @@ Runtime settings use the `REAPER_MCP_` prefix. The important paths are:
 | `REAPER_MCP_AUDIO_MEASUREMENT_TIMEOUT_SECONDS` | Per-file meter timeout |
 | `REAPER_MCP_AUDIO_MEASUREMENT_MAX_OUTPUT_BYTES` | Meter diagnostic output cap |
 
-All allowlists default to empty. See the [full configuration](#configuration)
-and [engineering standards](docs/reaper-mcp-engineering-standards.md) for the
+All allowlists default to empty. See the
+[engineering standards](docs/reaper-mcp-engineering-standards.md) for the
 complete configuration contract.
-
-## Architecture
-
-REAPER MCP has one Python control plane and one execution boundary inside
-REAPER. MCP, CLI, and REST calls converge on the same tool registry, services,
-validation, safety rules, and bridge client. An interface never gets a separate
-implementation of a DAW operation.
-
-[![REAPER MCP system architecture overview](assets/reaper-mcp-system-architecture.png)](assets/reaper-mcp-system-architecture.svg)
-
-Open the image for the full-resolution architecture map. The overview also has
-a version-controlled
-[Mermaid source](docs/diagrams/reaper-mcp-system-architecture.mmd) and a native
-editable
-[Excalidraw board](docs/diagrams/reaper-mcp-system-architecture.excalidraw).
-
-### What happens on a tool call
-
-1. The client calls a visible tool through MCP, the CLI, or loopback REST.
-2. The profile and capability gate decide whether that tool is exposed.
-3. The tool and service validate the request and enforce path and mutation
-   policies before bridge execution.
-4. The bridge client writes an atomic JSON envelope with a request ID,
-   mutation classification, dry-run flag, and undo label.
-5. The Lua bridge polls the request, validates it again at the REAPER boundary,
-   resolves GUIDs against current project state, executes the ReaScript
-   operation, and writes a structured response. Mutating commands run inside
-   one REAPER undo block.
-6. Python verifies the response request ID, normalizes the response or stable
-   error, then returns it unchanged in meaning through the selected interface.
-
-Synchronous commands use `requests/` and `responses/`. Long-running render
-operations use `jobs/`, so the client can start a job, inspect its status, and
-read a completed result without confusing a timeout with a successful render.
-
-### Responsibility boundaries
-
-| Layer | Owns | Does not own |
-| --- | --- | --- |
-| **Adapters** | MCP, CLI, and HTTP protocol formatting | DAW behavior or safety decisions |
-| **Tools** | Public names, schemas, and thin dispatch | Direct filesystem or REAPER calls |
-| **Services** | Producer workflows, validation, and result shaping | Lua or ReaScript details |
-| **Bridge client** | Request files, polling, timeouts, and cleanup | Musical decisions or project mutation |
-| **Lua bridge** | REAPER execution, GUID resolution, undo blocks, and responses | Client-specific protocol behavior |
-
-This split makes the important guarantees visible: all interfaces share one
-behavior path, invalid or disallowed work is rejected before bridge execution,
-and every response identifies what actually happened.
-
-Git history preserves the delivery sequence. Executable unit and opt-in
-integration tests provide the verification record.
 
 ## Verification and limitations
 
-The current acceptance evidence covers the bridge, project and track
-operations, transport, media, MIDI, FX, routing, automation, takes,
-arrangement, tempo, templates, analysis, workflows, interfaces, and isolated
-project rendering on Linux with REAPER 7.66. A July 28 targeted run also covers
-stock ReaEQ, ReaComp, and ReaLimit on the master bus plus guarded mastering
-plan preview, apply, and undo. An August 4 isolated run covers guarded REAPER 7
-whole-lane selection, stale-layout rejection, postcondition checks, and undo.
-
-Run the local checks without REAPER:
-
-```bash
-uv run pytest
-uv run ruff check .
-uv run ruff format --check .
-```
-
-Live acceptance is opt-in and requires an isolated REAPER instance with both
-the bridge and acceptance-probe Lua scripts running:
-
-```bash
-mkdir -p .private
-REAPER_MCP_LIVE_TEST=1 \
-REAPER_MCP_BRIDGE_DIR=/tmp/reaper-mcp-bridge \
-uv run pytest tests/integration \
-  --junitxml=.private/live-reaper-acceptance.xml
-```
-
-The ignored JUnit XML file is a machine-readable local record of the live run.
+Automated tests cover the Python service, bridge contracts, and package on
+Linux, macOS, and Windows. Live REAPER acceptance currently covers the core
+producer workflow and isolated rendering on Linux with REAPER 7.66. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for the local and live test commands.
 
 Known limitations are deliberate and documented:
 
@@ -419,58 +297,11 @@ Known limitations are deliberate and documented:
 - Fixed-lane tools inspect and select complete lanes. Swipe-comp area creation
   and automatic phrase comping remain out of scope because REAPER does not
   expose comp areas as stable, directly addressable API objects.
-- The Lua bridge must be running inside REAPER before a tool can execute.
 - Plugin UI automation, audio-rate control, and cloud collaboration are out
   of scope.
 
 The opt-in suite under [`tests/integration/`](tests/integration/) is the
 executable source for live REAPER acceptance.
-
-## Demo projects
-
-The [demo directory](demo/) contains lightweight REAPER project fixtures and
-source notices. Downloaded audio and generated peak files stay local because
-they are large or subject to separate distribution terms.
-
-## Project layout
-
-The repository separates public interfaces, producer logic, typed contracts,
-REAPER execution, tests, and release documentation.
-
-```text
-.
-|-- src/reaper_mcp/
-|   |-- server.py             MCP composition root
-|   |-- cli.py                CLI adapter
-|   |-- rest.py               loopback REST adapter
-|   |-- profiles.py           profiles and capability gates
-|   |-- tools/                thin public tool handlers
-|   |-- services/             producer workflows and business logic
-|   |-- models/               typed request and result schemas
-|   `-- bridge/               Python bridge transport
-|-- lua/
-|   |-- reaper_mcp_bridge.lua REAPER-side dispatcher and runtime
-|   `-- reaper_mcp_bridge_modules/
-|       |-- automation_navigation.lua
-|       |-- command_execution.lua
-|       |-- fx_arrangement_tempo.lua
-|       |-- media_midi.lua
-|       |-- project_routing_transport.lua
-|       |-- render.lua
-|       `-- vocal_tuning.lua
-|-- tests/
-|   |-- unit/                 tests without REAPER
-|   `-- integration/          opt-in live REAPER acceptance
-|-- docs/                     engineering standards and architecture sources
-|-- demo/                     local producer workflow fixtures
-|-- assets/                   README and product media
-|-- .github/workflows/
-|   |-- ci.yml                Linux, macOS, and Windows CI
-|   `-- release.yml           tagged source and wheel releases
-|-- pyproject.toml            package metadata and tool configuration
-|-- uv.lock                  reproducible dependency lockfile
-`-- README.md                product overview and usage guide
-```
 
 ## Releases and contribution
 
